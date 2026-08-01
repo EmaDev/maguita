@@ -32,10 +32,26 @@ export function MiniAppIcon({
   return <Component className={className} />;
 }
 
-/** Chip cuadrado con degradado de marca, el contenedor visual del ícono. */
-export function MiniAppBadge({ name }: { name: MiniApp["icon"] }) {
+/**
+ * Tono sólido por categoría, para que la grilla lea como accesos directos de
+ * colores distintos (como cualquier launcher) en vez de todas la misma marca.
+ * Usa el mismo léxico de tono que `StatCard` (primary/accent/success), pero
+ * de fondo lleno en vez de al 10% — acá el color es el protagonista del
+ * ícono, no un acento discreto. `danger` queda afuera a propósito: ese tono
+ * está reservado para errores/alertas en el resto de la app.
+ */
+const CATEGORY_TONE_BG: Record<MiniApp["category"], string> = {
+  Finanzas: "bg-primary",
+  Productividad: "bg-accent",
+  Utilidades: "bg-success",
+};
+
+/** Chip cuadrado de color sólido por categoría, el contenedor visual del ícono. */
+export function MiniAppBadge({ name, category }: { name: MiniApp["icon"]; category: MiniApp["category"] }) {
   return (
-    <span className="grid place-items-center shrink-0 w-11 h-11 rounded-2xl bg-gradient-to-br from-primary to-accent text-white shadow-sm shadow-primary/25">
+    <span
+      className={`grid place-items-center shrink-0 w-11 h-11 rounded-2xl text-white shadow-sm shadow-black/10 ${CATEGORY_TONE_BG[category]}`}
+    >
       <MiniAppIcon name={name} className="w-5 h-5" />
     </span>
   );

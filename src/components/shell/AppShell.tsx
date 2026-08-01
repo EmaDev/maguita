@@ -7,6 +7,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   AppHeader,
@@ -43,7 +44,7 @@ import {
   ShareAppSheet,
 } from "@/components/organisms/quick-actions";
 import { useTheme } from "@/components/theme/ThemeProvider";
-import { APP_NAME, APP_TAGLINE, APP_VERSION } from "@/lib/app-config";
+import { APP_NAME, APP_TAGLINE, APP_VERSION, ROUTES } from "@/lib/app-config";
 import type { CurrentUser } from "@/lib/auth/dal";
 import { AppSheetProvider } from "./app-sheet";
 import { AUTHED_NAV, GUEST_NAV, headerFor } from "./nav-config";
@@ -87,6 +88,8 @@ interface AppShellProps {
   authed: boolean;
   /** Para el saludo y el avatar de la cabecera. Ausente en la sección pública. */
   user?: CurrentUser;
+  /** Foto de perfil (`avatarUrl`) para el avatar de la cabecera. `null`/ausente muestra iniciales. */
+  avatarUrl?: string | null;
   notifications?: AppNotification[];
 }
 
@@ -133,6 +136,7 @@ export function AppShell({
   children,
   authed,
   user,
+  avatarUrl,
   notifications = [],
 }: AppShellProps) {
   const navItems = authed ? AUTHED_NAV : GUEST_NAV;
@@ -148,6 +152,7 @@ export function AppShell({
           <AppFrame
             authed={authed}
             user={user}
+            avatarUrl={avatarUrl}
             navItems={navItems}
             notifications={notifications}
           >
@@ -168,12 +173,14 @@ function AppFrame({
   children,
   authed,
   user,
+  avatarUrl,
   navItems,
   notifications: initialNotifications,
 }: {
   children: ReactNode;
   authed: boolean;
   user?: CurrentUser;
+  avatarUrl?: string | null;
   navItems: typeof AUTHED_NAV;
   notifications: AppNotification[];
 }) {
@@ -302,12 +309,19 @@ function AppFrame({
                 welcome ? (
                   // Los márgenes son el aire alrededor del avatar: el wrapper
                   // del slot `leading` trae `pl-1.5 pr-0.5` y la fila un `gap-1`,
-                  // que lo dejan pegado al borde y al título.
-                  <UserAvatar
-                    initials={welcome.initials}
-                    name={welcome.name}
-                    className="w-10 h-10 text-sm ml-1 mr-1.5"
-                  />
+                  // que lo dejan pegado al borde y al título. Lleva a Ajustes:
+                  // es el mismo lugar desde donde se edita el perfil.
+                  <Link href={ROUTES.ajustes} aria-label="Ir a ajustes">
+                    {/* mt-1.5: la fila del header queda centrada por flex, así
+                        que este margen es lo que separa al avatar del borde
+                        superior en vez de quedar pegado. */}
+                    <UserAvatar
+                      initials={welcome.initials}
+                      name={welcome.name}
+                      src={avatarUrl}
+                      className="w-10 h-10 text-sm ml-1 mr-1.5 mt-1.5"
+                    />
+                  </Link>
                 ) : undefined
               }
               largeTitle={screen.largeTitle}

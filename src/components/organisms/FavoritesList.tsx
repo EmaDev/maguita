@@ -72,7 +72,7 @@ export function FavoritesList({ favorites }: { favorites: MiniApp[] }) {
         <li key={app.id}>
           <Card variant="outline" padding="sm">
             <div className="flex items-center gap-3.5">
-              <MiniAppBadge name={app.icon} />
+              <MiniAppBadge name={app.icon} category={app.category} />
               <div className="min-w-0 flex-1">
                 <p className="font-medium truncate">{app.name}</p>
                 <p className="text-sm text-muted line-clamp-1">{app.description}</p>

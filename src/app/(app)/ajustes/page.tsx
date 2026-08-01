@@ -13,7 +13,7 @@ export default async function AjustesPage() {
 
   return (
     <SettingsPanel
-      user={toCurrentUser(session)}
+      user={toCurrentUser(session, profile)}
       avatarUrl={profile?.avatarUrl ?? null}
       logoutAction={logout}
     />

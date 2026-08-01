@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -86,8 +86,13 @@ export function MiniAppsGrid({ apps, favoriteIds, authed }: MiniAppsGridProps) {
       return;
     }
 
-    // Las mini-apps en sí no son parte de este alcance: avisamos en vez de
-    // navegar a una ruta que no existe.
+    if (app.path) {
+      router.push(app.path);
+      return;
+    }
+
+    // Todavía no tiene pantalla propia: avisamos en vez de navegar a una
+    // ruta que no existe.
     snack({ message: `${app.name} se abre en la próxima versión.`, variant: "info" });
   }
 
@@ -140,35 +145,21 @@ export function MiniAppsGrid({ apps, favoriteIds, authed }: MiniAppsGridProps) {
           No encontramos mini-apps con esos filtros.
         </p>
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2" aria-busy={pending}>
+        <ul className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3" aria-busy={pending}>
           {visible.map((app) => {
             const isFavorite = favorites.has(app.id);
             return (
               <li key={app.id}>
-                <Card variant="outline" padding="md" className="h-full">
-                  <div className="flex items-start gap-3.5">
-                    <MiniAppBadge name={app.icon} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <p className="font-medium truncate">{app.name}</p>
-                        {app.requiresAuth && !authed && (
-                          <LockIcon
-                            className="w-3.5 h-3.5 text-muted shrink-0"
-                            aria-label="Requiere cuenta"
-                          />
-                        )}
-                      </div>
-                      <p className="mt-0.5 text-sm text-muted">{app.description}</p>
-                      <p className="mt-2 text-xs font-medium uppercase tracking-wide text-primary">
-                        {app.category}
-                      </p>
-                    </div>
-                  </div>
+                <Card
+                  variant="outline"
+                  padding="sm"
+                  interactive
+                  onClick={() => open(app)}
+                  className="relative flex flex-col aspect-square"
+                >
+                  <MiniAppBadge name={app.icon} category={app.category} />
 
-                  <div className="flex items-center gap-2 mt-4">
-                    <Button size="sm" fullWidth onClick={() => open(app)}>
-                      Abrir
-                    </Button>
+                  <div className="absolute top-2 right-2">
                     <Button
                       size="icon"
                       variant={isFavorite ? "secondary" : "ghost"}
@@ -179,12 +170,28 @@ export function MiniAppsGrid({ apps, favoriteIds, authed }: MiniAppsGridProps) {
                           : `Agregar ${app.name} a favoritos`
                       }
                       disabled={pending}
-                      onClick={() => toggleFavorite(app)}
+                      onClick={(e: MouseEvent<HTMLButtonElement>) => {
+                        e.stopPropagation();
+                        toggleFavorite(app);
+                      }}
+                      className="!h-8 !w-8 !rounded-full"
                     >
-                      <HeartIcon
-                        className={isFavorite ? "w-5 h-5 text-danger" : "w-5 h-5"}
-                      />
+                      <HeartIcon className={isFavorite ? "w-4 h-4 text-danger" : "w-4 h-4"} />
                     </Button>
+                  </div>
+
+                  <div className="mt-auto min-w-0">
+                    <p className="text-[13px] font-semibold truncate">{app.name}</p>
+                    {app.requiresAuth && !authed ? (
+                      <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-muted/10 px-1.5 py-0.5 text-[10px] font-medium text-muted">
+                        <LockIcon className="w-3 h-3 shrink-0" aria-hidden="true" />
+                        Requiere iniciar sesión
+                      </span>
+                    ) : (
+                      <p className="mt-0.5 text-xs text-muted leading-tight line-clamp-2">
+                        {app.description}
+                      </p>
+                    )}
                   </div>
                 </Card>
               </li>

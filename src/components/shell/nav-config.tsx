@@ -95,6 +95,9 @@ export const SCREEN_HEADERS: Record<string, ScreenHeader> = {
     searchable: true,
     searchPlaceholder: "Buscar mini-apps…",
   },
+  [ROUTES.miniAppCalculadoraPropinas]: { title: "Calculadora de propinas", back: true },
+  [ROUTES.miniAppSplitGastos]: { title: "Split de gastos", back: true },
+  [ROUTES.miniAppGeneradorQr]: { title: "Generador de QR", back: true },
 };
 
 export function headerFor(pathname: string): ScreenHeader {

@@ -12,6 +12,10 @@ export const ROUTES = {
   ajustes: "/ajustes",
   editarPerfil: "/ajustes/perfil",
   miniApps: "/mini-apps",
+  miniAppCalculadoraPropinas: "/mini-apps/calculadora-propinas",
+  miniAppSplitGastos: "/mini-apps/split-gastos",
+  miniAppGeneradorQr: "/mini-apps/generador-qr",
+  miniAppGeneradorQrTexto: "/mini-apps/generador-qr/texto",
   login: "/login",
   signin: "/signin",
   recuperar: "/recuperar-password",
@@ -23,6 +27,7 @@ export const PROTECTED_ROUTES = [
   ROUTES.favoritos,
   ROUTES.asistente,
   ROUTES.ajustes,
+  ROUTES.miniAppSplitGastos,
 ] as const;
 
 /** Pantallas de autenticación: si ya hay sesión, no tiene sentido mostrarlas. */

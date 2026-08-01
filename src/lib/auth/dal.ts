@@ -2,6 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { ROUTES } from "@/lib/app-config";
+import type { Profile } from "@/lib/data/profile";
 import { getSession, type SessionPayload } from "./session";
 
 /**
@@ -65,11 +66,22 @@ export function initialsFrom(name: string, fallback: string): string {
   return initials || fallback[0]!.toUpperCase();
 }
 
-export function toCurrentUser(session: SessionPayload): CurrentUser {
+/**
+ * `session.name`/`session.email` son del momento del login (viajan en la
+ * cookie); si se pasa `profile` (lectura fresca de Firestore, ver
+ * `getProfile`), se usa en su lugar para no mostrar datos viejos tras editar
+ * el perfil. El nombre mostrado prioriza el alias (apodo libre) sobre el
+ * nombre real cuando el usuario definió uno; las iniciales del avatar de
+ * respaldo siguen calculándose del nombre real, no del alias, para que no
+ * cambien con cualquier apodo raro que se le ocurra poner.
+ */
+export function toCurrentUser(session: SessionPayload, profile?: Profile | null): CurrentUser {
+  const name = profile?.name ?? session.name;
+  const email = profile?.email ?? session.email;
   return {
     id: session.sub,
-    name: session.name,
-    email: session.email,
-    initials: initialsFrom(session.name, session.email),
+    name: profile?.alias?.trim() || name,
+    email,
+    initials: initialsFrom(name, email),
   };
 }
