@@ -1,0 +1,105 @@
+@import "tailwindcss";
+@import "lib-kit-components/styles.css";
+
+/* Tailwind v4 no escanea node_modules por defecto: sin esto, las clases que
+   usan los componentes de la librería (compilados en dist/) no se generan. */
+@source "../../node_modules/lib-kit-components/dist";
+
+/* ============================
+   MARCA — Maguita
+   Pisa los tokens de la librería (mismo nombre de var, definidos después).
+
+   Paleta bordó: el primario es el vino profundo y el acento un rosa vino más
+   claro, que es lo que le da aire a los degradés (`Card variant="gradient"`,
+   splash, marca). Los neutros no son grises puros: llevan una pizca del mismo
+   rojo para que las superficies no se vean frías al lado del bordó.
+
+   `success` y `danger` los declaramos acá (la librería trae los suyos) por dos
+   razones: el verde por defecto no llega a 4.5:1 sobre blanco, y el rojo de
+   error necesita separarse del bordó de marca — por eso quedó más brillante y
+   saturado que el primario.
+   ============================ */
+@theme {
+  --color-primary: #8a1538;
+  --color-primary-hover: #6d0f2b;
+  --color-accent: #b8455f;
+  --color-surface: #ffffff;
+  --color-surface-alt: #faf5f6;
+  --color-foreground: #1b1013;
+  --color-muted: #6d5a60;
+  --color-border: #ebdde1;
+  --color-success: #15803d;
+  --color-danger: #dc2626;
+
+  --font-sans: var(--font-app-sans), "Inter", system-ui, sans-serif;
+}
+
+/* En oscuro el bordó se aclara a rosa vino: #8a1538 sobre un fondo oscuro no
+   llega al contraste mínimo, y bajar el fondo en vez de subir el primario
+   dejaría la marca ilegible. El fondo es un casi-negro tirando a vino, no un
+   azul oscuro como en la paleta anterior. */
+.dark {
+  --color-primary: #e05e7d;
+  --color-primary-hover: #ef8ba3;
+  --color-accent: #d98aa5;
+  --color-surface: #150c10;
+  --color-surface-alt: #241419;
+  --color-foreground: #f6ecef;
+  --color-muted: #b09aa1;
+  --color-border: #3b2830;
+  --color-success: #4ade80;
+  --color-danger: #f87171;
+}
+
+/* ============================
+   SAFE AREAS
+   La librería aplica los insets en <body>, pero AppHeader (top), BottomNav
+   (bottom) y el <SafeArea edges={["left","right"]}> del shell ya los resuelven
+   por su cuenta. Dejarlos también en body los duplicaría, así que el body queda
+   en 0 y cada componente es dueño de su inset.
+
+   Las pantallas fuera del shell de la app (login, registro, recuperación,
+   offline, 404) resuelven sus insets con su propio <SafeArea edges="all">.
+   ============================ */
+body {
+  padding: 0;
+}
+
+/* ============================
+   Banners PWA sobre el BottomNav
+   PwaInstallPrompt (z-[120]) y UpdatePrompt (z-[125]) fijan su offset inferior
+   (bottom: max(1rem, safe-area + 1rem)) y no lo exponen como prop, así que en
+   las secciones con BottomNav quedan tapando la barra de tabs. Los levantamos
+   por encima (64px de barra + aire).
+
+   El FAB no necesita esta corrección: `FabActionSheets` sí acepta `className`
+   sobre su contenedor fixed, y el shell lo sube con `pb-[4.5rem] md:pb-0` —
+   que es lo que recomienda la guía.
+
+   Los selectores están acotados a los banners centrados (`left-1/2`) para no
+   pegarle al sheet de instalación de iOS, que es full-width y va pegado abajo
+   a propósito.
+   ============================ */
+[data-app-shell="with-nav"] [class*="z-[120]"][class*="left-1/2"],
+[data-app-shell="with-nav"] [class*="z-[125]"][class*="left-1/2"] {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 5rem);
+}
+
+@media (min-width: 48rem) {
+  /* En desktop BottomNav se auto-oculta (md:hidden) y todo vuelve a su
+     posición original. */
+  [data-app-shell="with-nav"] [class*="z-[120]"][class*="left-1/2"],
+  [data-app-shell="with-nav"] [class*="z-[125]"][class*="left-1/2"] {
+    bottom: max(1rem, calc(env(safe-area-inset-bottom, 0px) + 1rem));
+  }
+}
+
+/* Acompaña la clase `dark` del <html>: pinta los controles nativos
+   (scrollbars, inputs de fecha) y el fondo del overscroll. */
+html {
+  color-scheme: light;
+  background-color: var(--color-surface);
+}
+html.dark {
+  color-scheme: dark;
+}

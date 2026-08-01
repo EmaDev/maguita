@@ -1,0 +1,26 @@
+rules_version = '2';
+
+/**
+ * Security rules de Firebase Storage.
+ *
+ * Mismo criterio que `firestore.rules`: el cliente no escribe nada, todas las
+ * subidas van por el Admin SDK (`uploadAvatar`, `src/lib/firebase/storage.ts`),
+ * que las saltea por diseño.
+ *
+ * `avatars/{uid}/*` es de lectura pública a propósito: es la foto de perfil,
+ * se muestra con un `<img src>` normal sin manejar tokens de descarga.
+ *
+ * Publicar: firebase deploy --only storage:rules
+ */
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /avatars/{uid}/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

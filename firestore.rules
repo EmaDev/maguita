@@ -1,0 +1,48 @@
+rules_version = '2';
+
+/**
+ * Security rules de Firestore.
+ *
+ * Estas reglas gobiernan **sólo** el acceso desde el SDK del browser. El
+ * Firebase Admin SDK que usa el server las saltea por diseño: ahí la protección
+ * es `requireSession()` y que cada consulta se filtre por el `uid` de la sesión.
+ *
+ * Criterio: el cliente puede leer lo suyo, y no puede escribir nada. Todas las
+ * escrituras pasan por Server Actions, que es donde están las validaciones.
+ *
+ * Publicar: firebase deploy --only firestore:rules
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // Perfil de cada cuenta. El id del documento es el uid.
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // Favoritos por usuario. El id del documento es el uid.
+    match /favorites/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    /* Códigos de recuperación: nadie los toca desde el cliente. Aunque están
+       hasheados, listarlos revelaría qué cuentas tienen un pedido pendiente. */
+    match /passwordResetCodes/{code} {
+      allow read, write: if false;
+    }
+
+    /* Firestore ya deniega lo que ninguna regla permita — las reglas se
+       combinan con OR, así que este bloque no restringe nada. Queda explícito
+       para dejar claro que una colección nueva arranca cerrada hasta que se le
+       escriba su propio `match`. */
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
