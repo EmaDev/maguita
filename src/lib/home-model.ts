@@ -1,4 +1,5 @@
 import type { Habit, Movement } from "@/lib/data/home";
+import type { ExpenseCycle } from "@/lib/data/expenses";
 
 /**
  * Cálculos y formato de la pantalla de Inicio. Funciones puras, sin `"use
@@ -50,6 +51,23 @@ export function formatDay(key: string, today: string): string {
   return `${date.getDate()} ${MONTHS[date.getMonth()]}`;
 }
 
+/** "dd/mm" de una day key — recorta el string directo, sin pasar por `Date`. */
+export function formatShortDate(key: string): string {
+  return `${key.slice(8, 10)}/${key.slice(5, 7)}`;
+}
+
+/** "01/08 al 31/08" — lapso de un ciclo del gestor de gastos, para cuando no tiene título propio. */
+export function formatDateRangeShort(startDate: string, endDate: string): string {
+  return `${formatShortDate(startDate)} al ${formatShortDate(endDate)}`;
+}
+
+/** Título de un ciclo: el que puso el usuario, o su lapso de fechas si no definió ninguno. */
+export function expenseCycleTitle(
+  cycle: Pick<ExpenseCycle, "title" | "startDate" | "endDate">
+): string {
+  return cycle.title?.trim() || formatDateRangeShort(cycle.startDate, cycle.endDate);
+}
+
 /**
  * Formato de moneda hecho a mano sobre `toLocaleString`, no con
  * `Intl.NumberFormat(style: "currency")`: el símbolo y el espacio que mete cada
@@ -65,30 +83,6 @@ export function formatMoney(amount: number): string {
 export function formatSignedMoney(amount: number): string {
   const rounded = Math.round(amount);
   return rounded > 0 ? `+${formatMoney(rounded)}` : formatMoney(rounded);
-}
-
-export interface MonthBalance {
-  income: number;
-  /** Total gastado, en positivo. */
-  expense: number;
-  balance: number;
-  count: number;
-}
-
-/** Ingresos, gastos y balance del mes calendario al que pertenece `today`. */
-export function monthBalance(movements: Movement[], today: string): MonthBalance {
-  const month = today.slice(0, 7);
-  return movements
-    .filter((movement) => movement.date.startsWith(month))
-    .reduce<MonthBalance>(
-      (acc, movement) => ({
-        income: acc.income + (movement.amount > 0 ? movement.amount : 0),
-        expense: acc.expense + (movement.amount < 0 ? -movement.amount : 0),
-        balance: acc.balance + movement.amount,
-        count: acc.count + 1,
-      }),
-      { income: 0, expense: 0, balance: 0, count: 0 }
-    );
 }
 
 /**
@@ -127,4 +121,94 @@ export function habitsToday(habits: Habit[], today: string): HabitsToday {
 /** Más reciente primero; a igual día, el orden original (el seed ya viene ordenado). */
 export function byDayDesc<T extends { date: string }>(items: T[]): T[] {
   return [...items].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+export interface ExpenseCycleProgress {
+  /** Total gastado en el ciclo, en positivo. */
+  spent: number;
+  /** Total de ingresos cargados en el ciclo, en positivo. */
+  income: number;
+  /** Saldo inicial + ingresos − gastos. Puede ser negativo. */
+  remaining: number;
+  /** `spent / expenseLimit` en 0–100, saturado. */
+  pct: number;
+  over: boolean;
+  /** `today` es posterior a `endDate`. */
+  ended: boolean;
+  /** Días hasta `endDate`, 0 si ya terminó. */
+  daysLeft: number;
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** Gastado, ingresado, saldo restante y % del tope de un ciclo, a partir de sus movimientos. */
+export function expenseCycleProgress(
+  cycle: Pick<ExpenseCycle, "initialBalance" | "expenseLimit" | "endDate">,
+  movements: Movement[],
+  today: string
+): ExpenseCycleProgress {
+  const spent = movements.reduce(
+    (total, movement) => total + (movement.amount < 0 ? -movement.amount : 0),
+    0
+  );
+  const income = movements.reduce(
+    (total, movement) => total + (movement.amount > 0 ? movement.amount : 0),
+    0
+  );
+  const ended = today > cycle.endDate;
+  const daysLeft = ended
+    ? 0
+    : Math.max(
+        0,
+        Math.round((parseDay(cycle.endDate).getTime() - parseDay(today).getTime()) / MS_PER_DAY)
+      );
+
+  return {
+    spent,
+    income,
+    remaining: cycle.initialBalance + income - spent,
+    pct: cycle.expenseLimit > 0 ? Math.min(100, (spent / cycle.expenseLimit) * 100) : 0,
+    over: spent > cycle.expenseLimit,
+    ended,
+    daysLeft,
+  };
+}
+
+export interface CategorySpending {
+  category: string;
+  categoryEmoji?: string;
+  spent: number;
+}
+
+/** Gastado por categoría, de mayor a menor — para "Categorías con más gasto" del detalle de un período. */
+export function categoryBreakdown(movements: Movement[]): CategorySpending[] {
+  const totals = new Map<string, CategorySpending>();
+  for (const movement of movements) {
+    if (movement.amount >= 0) continue;
+    const current = totals.get(movement.category) ?? {
+      category: movement.category,
+      categoryEmoji: movement.categoryEmoji,
+      spent: 0,
+    };
+    current.spent += -movement.amount;
+    totals.set(movement.category, current);
+  }
+  return Array.from(totals.values()).sort((a, b) => b.spent - a.spent);
+}
+
+export interface DaySpending {
+  date: string;
+  spent: number;
+}
+
+/** Gastado por día, cronológico — para "Días con más consumo" del detalle de un período. */
+export function dailyBreakdown(movements: Movement[]): DaySpending[] {
+  const totals = new Map<string, number>();
+  for (const movement of movements) {
+    if (movement.amount >= 0) continue;
+    totals.set(movement.date, (totals.get(movement.date) ?? 0) + -movement.amount);
+  }
+  return Array.from(totals.entries())
+    .map(([date, spent]) => ({ date, spent }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }

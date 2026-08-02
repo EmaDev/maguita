@@ -1,5 +1,7 @@
 import "server-only";
 import { dayKey } from "@/lib/home-model";
+import { getActiveExpenseCycle, getExpenseMovements, type ExpenseCycle } from "./expenses";
+import { getExpenseCategories, type ExpenseCategoryItem } from "./expense-categories";
 
 /**
  * Datos de la pantalla de Inicio: movimientos, notas y hábitos.
@@ -14,6 +16,8 @@ export interface Movement {
   id: string;
   title: string;
   category: string;
+  /** Emoji de la categoría al momento de cargar el gasto. Ausente en movimientos que no vienen del gestor de gastos. */
+  categoryEmoji?: string;
   /** Positivo = ingreso, negativo = gasto. Sin decimales: son pesos enteros. */
   amount: number;
   /** Día del movimiento en formato `yyyy-mm-dd` (sin hora: se registra por día). */
@@ -46,20 +50,34 @@ export interface HomeData {
    * primer render del browser difieran cuando están en husos distintos.
    */
   today: string;
+  /** Movimientos del ciclo activo del gestor de gastos (`[]` si no hay ninguno). */
   movements: Movement[];
   notes: Note[];
   habits: Habit[];
+  /** Ciclo `active` del gestor de gastos, o `null` si el usuario todavía no armó ninguno. */
+  expenseCycle: ExpenseCycle | null;
+  /** ABM de categorías del usuario (o el set por default si todavía no tocó el ABM). */
+  expenseCategories: ExpenseCategoryItem[];
 }
 
 /**
- * `_userId` todavía no filtra nada: no hay de dónde traer los datos, pero la
- * firma ya es la definitiva.
+ * Notas y hábitos todavía no tienen backend (`_userId` no filtra nada ahí),
+ * pero el gestor de gastos sí: sus movimientos son los del ciclo activo del
+ * usuario, si tiene uno.
  */
-export async function getHomeData(_userId: string): Promise<HomeData> {
+export async function getHomeData(userId: string): Promise<HomeData> {
+  const [expenseCycle, expenseCategories] = await Promise.all([
+    getActiveExpenseCycle(userId),
+    getExpenseCategories(userId),
+  ]);
+  const movements = expenseCycle ? await getExpenseMovements(expenseCycle.id) : [];
+
   return {
     today: dayKey(new Date()),
-    movements: [],
+    movements,
     notes: [],
     habits: [],
+    expenseCycle,
+    expenseCategories,
   };
 }

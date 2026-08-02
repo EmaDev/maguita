@@ -9,13 +9,15 @@ import {
 } from "@/components/atoms/icons";
 import { SummaryCard } from "@/components/molecules/SummaryCard";
 import type { Habit, Movement, Note } from "@/lib/data/home";
+import type { ExpenseCycle } from "@/lib/data/expenses";
 import {
+  expenseCycleProgress,
   formatDay,
   formatMoney,
   formatSignedMoney,
   habitsToday,
-  monthBalance,
 } from "@/lib/home-model";
+import { MovementsList } from "./MovementsList";
 import type { HomeTab } from "./tabs";
 
 /**
@@ -28,6 +30,7 @@ import type { HomeTab } from "./tabs";
 interface SummaryPanelProps {
   today: string;
   movements: Movement[];
+  expenseCycle: ExpenseCycle | null;
   notes: Note[];
   habits: Habit[];
   onGoTo: (tab: HomeTab) => void;
@@ -36,11 +39,20 @@ interface SummaryPanelProps {
 export function SummaryPanel({
   today,
   movements,
+  expenseCycle,
   notes,
   habits,
   onGoTo,
 }: SummaryPanelProps) {
-  const month = monthBalance(movements, today);
+  // `movements` ya son sólo los del ciclo activo del gestor de gastos (ver
+  // `getHomeData`), así que el balance tiene que salir de la misma cuenta que
+  // usa Movimientos (`expenseCycleProgress`: saldo inicial + ingresos −
+  // gastos). Filtrar además por "mes calendario" (como hacía la vieja
+  // `monthBalance`) estaba mal: el período de un ciclo no tiene por qué
+  // coincidir con un mes, así que esa cuenta se comía movimientos del ciclo o
+  // ignoraba el saldo inicial, mostrando un número distinto al de Movimientos
+  // para lo que es el mismo saldo.
+  const progress = expenseCycle ? expenseCycleProgress(expenseCycle, movements, today) : null;
   const habitsStatus = habitsToday(habits, today);
   const lastMovement = movements[0];
   const lastNote = notes[0];
@@ -59,11 +71,15 @@ export function SummaryPanel({
 
         <div className="grid grid-cols-2 gap-3">
           <SummaryCard
-            label="Balance del mes"
-            value={formatMoney(month.balance)}
-            tone={month.balance < 0 ? "danger" : "success"}
+            label="Saldo disponible"
+            value={progress ? formatMoney(progress.remaining) : "Sin período activo"}
+            tone={progress ? (progress.remaining < 0 ? "danger" : "success") : "primary"}
             icon={<TrendIcon />}
-            footnote={`${formatSignedMoney(month.income)} / ${formatMoney(-month.expense)}`}
+            footnote={
+              progress
+                ? `${formatSignedMoney(progress.income)} / ${formatMoney(-progress.spent)}`
+                : "Armá tu gestor de gastos en Movimientos."
+            }
             onClick={() => onGoTo("movimientos")}
           />
 
@@ -121,7 +137,7 @@ export function SummaryPanel({
       <Card variant="glass" padding="md">
         <CardHeader
           title="Últimos movimientos"
-          subtitle={`${month.count} este mes`}
+          subtitle={`${movements.length} ${movements.length === 1 ? "movimiento" : "movimientos"} en el período`}
           aside={
             <Button size="sm" variant="ghost" onClick={() => onGoTo("movimientos")}>
               Ver todos
@@ -134,28 +150,9 @@ export function SummaryPanel({
             Todavía no cargaste movimientos.
           </p>
         ) : (
-          <ul className="mt-3 divide-y divide-border">
-            {recent.map((movement) => (
-              <li
-                key={movement.id}
-                className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{movement.title}</p>
-                  <p className="text-xs text-muted">
-                    {movement.category} · {formatDay(movement.date, today)}
-                  </p>
-                </div>
-                <span
-                  className={`shrink-0 text-sm font-semibold tabular-nums ${
-                    movement.amount > 0 ? "text-success" : "text-foreground"
-                  }`}
-                >
-                  {formatSignedMoney(movement.amount)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="mt-3">
+            <MovementsList movements={recent} today={today} />
+          </div>
         )}
       </Card>
     </div>

@@ -1,29 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Button,
-  Input,
-  ShareButton,
-  Textarea,
-  useSnackbar,
-} from "lib-kit-components";
+import { Button, ShareButton, Textarea, useSnackbar } from "lib-kit-components";
 import { APP_NAME, APP_TAGLINE } from "@/lib/app-config";
-import { useExpenseDrafts, useNoteDrafts } from "@/lib/data/local-drafts";
+import { useNoteDrafts } from "@/lib/data/local-drafts";
 
 /**
- * Contenido de los tres sheets del FAB del shell (`FabActionSheets`).
+ * Contenido de los sheets del FAB de Inicio (`FabActionSheets` en
+ * `HomeBoard`). El de gastos vive en `home/NewExpenseMovementSheet` — ya
+ * tiene backend propio (el gestor de gastos), así que no encaja acá.
  *
  * Importante: `FabActionSheets` monta los tres sheets a la vez y sólo abre el
  * que corresponde, así que estos componentes **no** pueden hacer fetch ni pedir
  * permisos al montarse — sólo estado local.
  *
- * Todavía no hay backend de altas: lo que se carga queda en el dispositivo
- * (`lib/data/local-drafts`) y el snack lo aclara. Cuando exista la API, lo
- * único que cambia es el cuerpo de `save()`.
- *
- * La pantalla de Inicio lee esos mismos borradores y los mezcla con los datos
- * del server, así que lo que se carga acá aparece enseguida en su tab.
+ * Notas todavía no tienen backend: lo que se carga queda en el dispositivo
+ * (`lib/data/local-drafts`) y el snack lo aclara. La pantalla de Inicio lee
+ * esos mismos borradores y los mezcla con los datos del server, así que lo
+ * que se carga acá aparece enseguida en su tab.
  */
 
 export function NewNoteSheet() {
@@ -58,53 +52,6 @@ export function NewNoteSheet() {
         {notes.length === 0
           ? "Todavía no guardaste ninguna nota."
           : `${notes.length} ${notes.length === 1 ? "nota guardada" : "notas guardadas"} en este dispositivo.`}
-      </p>
-    </div>
-  );
-}
-
-export function NewExpenseSheet() {
-  const { snack } = useSnackbar();
-  const [expenses, setExpenses] = useExpenseDrafts();
-  const [amount, setAmount] = useState("");
-  const [concept, setConcept] = useState("");
-
-  const parsed = Number(amount.replace(",", "."));
-  const valid = Number.isFinite(parsed) && parsed > 0 && concept.trim().length > 0;
-
-  function save() {
-    if (!valid) return;
-    setExpenses((prev) => [
-      { id: Date.now(), amount: parsed, concept: concept.trim() },
-      ...prev,
-    ]);
-    setAmount("");
-    setConcept("");
-    snack({ message: "Gasto guardado en este dispositivo.", variant: "success" });
-  }
-
-  return (
-    <div className="space-y-3">
-      <Input
-        label="Monto"
-        // inputMode numérico: abre el teclado de números sin bloquear la coma
-        // decimal, que `type="number"` sí rechaza en varios teclados móviles.
-        inputMode="decimal"
-        value={amount}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAmount(e.target.value)}
-      />
-      <Input
-        label="Concepto"
-        value={concept}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConcept(e.target.value)}
-      />
-      <Button fullWidth onClick={save} disabled={!valid}>
-        Guardar gasto
-      </Button>
-      <p className="text-xs text-muted">
-        {expenses.length === 0
-          ? "Todavía no cargaste ningún gasto."
-          : `${expenses.length} ${expenses.length === 1 ? "gasto cargado" : "gastos cargados"} en este dispositivo.`}
       </p>
     </div>
   );

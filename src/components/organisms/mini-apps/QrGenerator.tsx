@@ -9,7 +9,7 @@ import {
   ColorPicker,
   Input,
   Select,
-  Tabs,
+  TabsGlow,
   Textarea,
   useHaptics,
   useSnackbar,
@@ -220,7 +220,7 @@ export function QrGenerator() {
   return (
     <div className="space-y-4">
       <Card variant="outline" padding="md" className="space-y-4">
-        <Tabs items={[...MODE_TABS]} value={mode} onChange={(id: string) => setMode(id as QrMode)} variant="segmented" size="sm" fitted />
+        <TabsGlow items={[...MODE_TABS]} value={mode} onChange={(id: string) => setMode(id as QrMode)} size="sm" />
 
         {mode === "url" ? (
           <Input

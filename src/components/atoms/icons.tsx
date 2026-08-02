@@ -194,6 +194,12 @@ export const TrashIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const ChevronDownIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="6 9 12 15 18 9" />
+  </Icon>
+);
+
 export const NoteIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M5 4.5h14v10.5L14.5 19.5H5V4.5Z" />

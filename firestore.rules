@@ -37,6 +37,26 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    /* Gestor de gastos (tab Movimientos, y a futuro la mini-app que comparte
+       estas mismas colecciones). Id autogenerado — el dueño se valida por
+       campo (`ownerId`) en vez de por id de documento como `users`/`favorites`. */
+    match /expenseCycles/{cycleId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /expenseMovements/{movementId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // ABM de categorías del gestor de gastos. El id del documento es el uid,
+    // igual que `favorites`: un solo documento por cuenta con el array entero.
+    match /expenseCategories/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
     /* Firestore ya deniega lo que ninguna regla permita — las reglas se
        combinan con OR, así que este bloque no restringe nada. Queda explícito
        para dejar claro que una colección nueva arranca cerrada hasta que se le

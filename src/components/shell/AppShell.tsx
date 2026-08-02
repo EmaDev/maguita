@@ -12,7 +12,6 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   AppHeader,
   BottomNav,
-  FabActionSheets,
   NativeShell,
   OfflineBanner,
   PwaInstallPrompt,
@@ -25,24 +24,15 @@ import {
   useSplash,
   useStatusBarColor,
   type AppNotification,
-  type FabSheetAction,
   type HeaderAction,
 } from "lib-kit-components";
 import {
   BellIcon,
   BrandMark,
   MoonIcon,
-  NoteIcon,
-  ReceiptIcon,
-  ShareIcon,
   SunIcon,
 } from "@/components/atoms/icons";
 import { UserAvatar } from "@/components/molecules/UserAvatar";
-import {
-  NewExpenseSheet,
-  NewNoteSheet,
-  ShareAppSheet,
-} from "@/components/organisms/quick-actions";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { APP_NAME, APP_TAGLINE, APP_VERSION, ROUTES } from "@/lib/app-config";
 import type { CurrentUser } from "@/lib/auth/dal";
@@ -51,36 +41,6 @@ import { AUTHED_NAV, GUEST_NAV, headerFor } from "./nav-config";
 import { NotificationDrawer } from "./notification-drawer";
 import { ShellSearchProvider } from "./shell-search";
 import { ShellTabsProvider } from "./shell-tabs";
-
-/**
- * Las tres acciones del FAB. Constante a nivel de módulo: `FabActionSheets`
- * usa el índice del array como `key` de cada sheet, así que el orden tiene que
- * ser estable entre renders.
- */
-const QUICK_ACTIONS: FabSheetAction[] = [
-  {
-    icon: <NoteIcon />,
-    label: "Nueva nota",
-    sheetTitle: "Nueva nota",
-    sheetDescription: "Anotá algo rápido antes de que se te olvide.",
-    content: <NewNoteSheet />,
-  },
-  {
-    icon: <ReceiptIcon />,
-    label: "Nuevo gasto",
-    tone: "accent",
-    sheetTitle: "Nuevo gasto",
-    sheetSnapPoints: [0.5, 0.9],
-    content: <NewExpenseSheet />,
-  },
-  {
-    icon: <ShareIcon />,
-    label: "Compartir",
-    tone: "success",
-    sheetTitle: `Compartir ${APP_NAME}`,
-    content: <ShareAppSheet />,
-  },
-];
 
 interface AppShellProps {
   children: ReactNode;
@@ -125,12 +85,12 @@ function useGreeting(): string {
  *       ├── SafeArea (fillViewport, edges left/right)
  *       │   ├── AppHeader           ← resuelve el inset de arriba
  *       │   └── <main>              ← acá entran las pantallas
- *       ├── BottomNav               ← z-40, md:hidden
- *       └── FabActionSheets         ← FAB z-90; sus sheets abren en z-140/150
+ *       │       └── FabActionSheets ← sólo lo monta `HomeBoard`, no el shell
+ *       └── BottomNav               ← z-40, md:hidden
  *
  * El árbol explícito (en vez de `PackageApp`) es lo que permite decidir acá qué
- * se monta y con qué props: la campana de notificaciones interactiva, el
- * `AppHeader` único resuelto por ruta, o el FAB sólo con sesión.
+ * se monta y con qué props: la campana de notificaciones interactiva o el
+ * `AppHeader` único resuelto por ruta.
  */
 export function AppShell({
   children,
@@ -370,19 +330,6 @@ function AppFrame({
               pb-[env(safe-area-inset-bottom)]. Meterlo adentro le sumaría el
               padding lateral del contenedor sin necesidad. */}
           <BottomNav items={navItems} />
-  
-          {/* Sólo con sesión: sin ella las tres altas no tienen dónde ir.
-              El pb es lo que sube el FAB por encima del BottomNav — el contenedor
-              está anclado por `bottom`, así que el padding lo empuja hacia arriba
-              sin tocar el anclaje. md:pb-0 lo devuelve abajo cuando la nav
-              desaparece. */}
-          {authed && (
-            <FabActionSheets
-              actions={QUICK_ACTIONS}
-              mainLabel="Crear"
-              className="pb-[4.5rem] md:pb-0"
-            />
-          )}
   
           {/* El panel de notificaciones en versión sidebar: entra desde el borde
               derecho a todo lo alto en vez de abrir un BottomSheet. */}

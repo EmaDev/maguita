@@ -28,6 +28,16 @@ export const COLLECTIONS = {
   favorites: "favorites",
   /** Códigos de recuperación de contraseña, de un solo uso. */
   passwordResetCodes: "passwordResetCodes",
+  /**
+   * Períodos del gestor de gastos (tab Movimientos). Id autogenerado: un
+   * usuario puede tener varios a lo largo del tiempo, sólo uno `active` a la
+   * vez. Colección compartida a futuro con la mini-app de gastos.
+   */
+  expenseCycles: "expenseCycles",
+  /** Movimientos de cada `expenseCycles/{cycleId}`. Id autogenerado. */
+  expenseMovements: "expenseMovements",
+  /** Categorías del gestor de gastos por usuario. Id del documento = `uid`. */
+  expenseCategories: "expenseCategories",
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];
@@ -74,11 +84,59 @@ export interface PasswordResetCodeDoc {
   createdAt: Timestamp;
 }
 
+export type ExpenseCycleStatus = "active" | "closed";
+
+export interface ExpenseCycleDoc {
+  ownerId: string;
+  /** Título libre ("Gastos vacaciones Ushuaia"). `null` = sin definir, la UI muestra el lapso de fechas. */
+  title: string | null;
+  /** Día de inicio y fin del período, `yyyy-mm-dd` (sin hora). */
+  startDate: string;
+  endDate: string;
+  /** Pesos enteros, igual que `Movement.amount`. */
+  initialBalance: number;
+  expenseLimit: number;
+  status: ExpenseCycleStatus;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  /** `null` mientras está `active`. */
+  closedAt: Timestamp | null;
+}
+
+export interface ExpenseMovementDoc {
+  cycleId: string;
+  /** Duplicado del `ownerId` del ciclo: permite validar dueño sin un `get()` extra. */
+  ownerId: string;
+  title: string;
+  /** Nombre y emoji de la categoría al momento de cargar el gasto (ver `ExpenseCategoryItem`). */
+  category: string;
+  categoryEmoji: string;
+  /** Negativo = gasto. Este alta sólo carga gastos, ver `addExpenseMovementAction`. */
+  amount: number;
+  date: string;
+  createdAt: Timestamp;
+}
+
+export interface ExpenseCategoryItem {
+  id: string;
+  name: string;
+  emoji: string;
+}
+
+export interface ExpenseCategoriesDoc {
+  /** ABM del usuario. Sin documento todavía = usa `DEFAULT_EXPENSE_CATEGORIES`. */
+  categories: ExpenseCategoryItem[];
+  updatedAt: Timestamp;
+}
+
 /** Mapea cada colección con la forma de sus documentos. */
 export interface CollectionTypes {
   [COLLECTIONS.users]: UserDoc;
   [COLLECTIONS.favorites]: FavoritesDoc;
   [COLLECTIONS.passwordResetCodes]: PasswordResetCodeDoc;
+  [COLLECTIONS.expenseCycles]: ExpenseCycleDoc;
+  [COLLECTIONS.expenseMovements]: ExpenseMovementDoc;
+  [COLLECTIONS.expenseCategories]: ExpenseCategoriesDoc;
 }
 
 /* ------------------------------------------------------------------ *

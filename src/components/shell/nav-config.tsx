@@ -101,5 +101,10 @@ export const SCREEN_HEADERS: Record<string, ScreenHeader> = {
 };
 
 export function headerFor(pathname: string): ScreenHeader {
+  // `/inicio/periodos/{cycleId}` es dinámica (id de Firestore), no puede
+  // tener una entrada fija en `SCREEN_HEADERS` como el resto.
+  if (pathname.startsWith(`${ROUTES.movementsPeriodos}/`)) {
+    return { title: "Período anterior", back: true };
+  }
   return SCREEN_HEADERS[pathname] ?? { title: "Maguita" };
 }

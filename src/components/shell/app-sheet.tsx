@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { usePathname } from "next/navigation";
 import { BottomSheet, type BottomSheetSize } from "lib-kit-components";
 
 /**
@@ -44,19 +45,31 @@ export function useAppSheet(): AppSheetValue {
 }
 
 export function AppSheetProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   const [content, setContent] = useState<ReactNode>(null);
   const [options, setOptions] = useState<AppSheetOptions>({});
-  const [open, setOpen] = useState(false);
 
-  const openSheet = useCallback((next: ReactNode, nextOptions?: AppSheetOptions) => {
-    setContent(next);
-    setOptions(nextOptions ?? {});
-    setOpen(true);
-  }, []);
+  // `path` guarda la ruta en la que se abrió. El sheet lo abre la pantalla en
+  // la que estás (ej. "Nuevo gasto" desde Movimientos, con un `cycleId`
+  // propio de ese momento): si el usuario navega con el BottomNav sin
+  // cerrarlo a mano, en la ruta nueva `path` ya no matchea y queda cerrado
+  // solo, sin un efecto aparte — misma técnica que la tab activa y el
+  // buscador de `AppShell` (`AppFrame`).
+  const [sheet, setSheet] = useState({ path: pathname, open: false });
+  const open = sheet.path === pathname && sheet.open;
+
+  const openSheet = useCallback(
+    (next: ReactNode, nextOptions?: AppSheetOptions) => {
+      setContent(next);
+      setOptions(nextOptions ?? {});
+      setSheet({ path: pathname, open: true });
+    },
+    [pathname]
+  );
 
   // Sólo bajamos `open`: el contenido queda montado para que la animación de
   // salida del sheet no se corte en seco.
-  const closeSheet = useCallback(() => setOpen(false), []);
+  const closeSheet = useCallback(() => setSheet((s) => ({ ...s, open: false })), []);
 
   const value = useMemo(() => ({ openSheet, closeSheet }), [openSheet, closeSheet]);
 
