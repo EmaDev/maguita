@@ -151,7 +151,7 @@ export function MiniAppsGrid({ apps, favoriteIds, authed }: MiniAppsGridProps) {
             return (
               <li key={app.id}>
                 <Card
-                  variant="outline"
+                  variant="elevated"
                   padding="sm"
                   interactive
                   onClick={() => open(app)}

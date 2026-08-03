@@ -188,6 +188,22 @@ export const ClockIcon = (p: IconProps) => (
   </Icon>
 );
 
+/** Tres puntitos verticales: menú de acciones. Van rellenos, no trazados. */
+export const MoreIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none" />
+  </Icon>
+);
+
+export const PencilIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 20l.8-4L16 4.8a1.8 1.8 0 0 1 2.5 0l.7.7a1.8 1.8 0 0 1 0 2.5L8 19.2 4 20Z" />
+    <path d="M14.5 6.5l3 3" />
+  </Icon>
+);
+
 export const TrashIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M4 7h16M9.5 7V5h5v2M6 7l1 13h10l1-13" />
@@ -197,6 +213,36 @@ export const TrashIcon = (p: IconProps) => (
 export const ChevronDownIcon = (p: IconProps) => (
   <Icon {...p}>
     <polyline points="6 9 12 15 18 9" />
+  </Icon>
+);
+
+/** Grilla de una columna, para el selector de columnas de la tab Notas. */
+export const ColumnOneIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="4.5" y="4.5" width="15" height="6" rx="1.5" />
+    <rect x="4.5" y="13.5" width="15" height="6" rx="1.5" />
+  </Icon>
+);
+
+/** Grilla de dos columnas. Par del anterior. */
+export const ColumnTwoIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="4" y="4.5" width="6.5" height="15" rx="1.5" />
+    <rect x="13.5" y="4.5" width="6.5" height="15" rx="1.5" />
+  </Icon>
+);
+
+export const CalendarIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="4" y="5.5" width="16" height="15" rx="2.5" />
+    <path d="M8 3.5v4M16 3.5v4M4 10.5h16" />
+  </Icon>
+);
+
+export const FlagIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M6 3.5v17" />
+    <path d="M6 4.5h10.5l-2.8 3.5 2.8 3.5H6" />
   </Icon>
 );
 
@@ -252,6 +298,20 @@ export const CameraIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
     <circle cx="12" cy="13" r="4" />
+  </Icon>
+);
+
+export const LinkIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M10 14a4 4 0 0 0 5.7 0l2-2a4 4 0 0 0-5.7-5.7l-1 1" />
+    <path d="M14 10a4 4 0 0 0-5.7 0l-2 2a4 4 0 0 0 5.7 5.7l1-1" />
+  </Icon>
+);
+
+export const ExternalLinkIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 5.5H5.5a1.5 1.5 0 0 0-1.5 1.5v11.5A1.5 1.5 0 0 0 5.5 20H17a1.5 1.5 0 0 0 1.5-1.5V15" />
+    <path d="M13 4.5h6v6M18.5 5 11 12.5" />
   </Icon>
 );
 

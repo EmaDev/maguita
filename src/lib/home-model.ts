@@ -1,4 +1,4 @@
-import type { Habit, Movement } from "@/lib/data/home";
+import type { Habit, Movement, Note, NotePriority } from "@/lib/data/home";
 import type { ExpenseCycle } from "@/lib/data/expenses";
 
 /**
@@ -121,6 +121,36 @@ export function habitsToday(habits: Habit[], today: string): HabitsToday {
 /** Más reciente primero; a igual día, el orden original (el seed ya viene ordenado). */
 export function byDayDesc<T extends { date: string }>(items: T[]): T[] {
   return [...items].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+const PRIORITY_WEIGHT: Record<NotePriority, number> = { high: 3, medium: 2, low: 1 };
+
+export type NoteSortField = "date" | "priority";
+export type NoteSortDirection = "asc" | "desc";
+
+/** Orden "natural" de cada campo: prioridad más alta primero, fecha más reciente primero. */
+function compareNotesDesc(a: Note, b: Note, field: NoteSortField): number {
+  if (field === "priority") {
+    const diff = PRIORITY_WEIGHT[b.priority] - PRIORITY_WEIGHT[a.priority];
+    if (diff !== 0) return diff;
+  }
+  // También desempata el orden por prioridad: a igual prioridad, la más reciente arriba.
+  return a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+}
+
+/**
+ * Ordena notas por fecha o prioridad, en cualquiera de las dos direcciones —
+ * la barra de filtros de la tab Notas expone un toggle asc/desc, así que ya no
+ * alcanza con un único orden fijo por campo. `asc` invierte el comparador
+ * entero, desempate incluido (a igual prioridad, la más vieja arriba).
+ */
+export function sortNotes(
+  notes: Note[],
+  field: NoteSortField,
+  direction: NoteSortDirection
+): Note[] {
+  const flip = direction === "asc" ? -1 : 1;
+  return [...notes].sort((a, b) => flip * compareNotesDesc(a, b, field));
 }
 
 export interface ExpenseCycleProgress {

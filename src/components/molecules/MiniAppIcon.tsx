@@ -2,6 +2,7 @@ import {
   CalculatorIcon,
   ClockIcon,
   GridIcon,
+  LinkIcon,
   QrIcon,
   SparkleIcon,
   WalletIcon,
@@ -19,6 +20,7 @@ const ICONS = {
   clock: ClockIcon,
   grid: GridIcon,
   sparkle: SparkleIcon,
+  link: LinkIcon,
 } satisfies Record<MiniApp["icon"], unknown>;
 
 export function MiniAppIcon({

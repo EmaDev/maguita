@@ -38,6 +38,10 @@ export const COLLECTIONS = {
   expenseMovements: "expenseMovements",
   /** Categorías del gestor de gastos por usuario. Id del documento = `uid`. */
   expenseCategories: "expenseCategories",
+  /** Notas de la tab Notas. Id autogenerado: muchas por usuario. */
+  notes: "notes",
+  /** Links guardados de la mini-app de links. Id autogenerado: muchos por usuario. */
+  links: "links",
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];
@@ -129,6 +133,40 @@ export interface ExpenseCategoriesDoc {
   updatedAt: Timestamp;
 }
 
+export type NotePriority = "low" | "medium" | "high";
+
+export interface NoteDoc {
+  ownerId: string;
+  text: string;
+  /** Día al que corresponde la nota, `yyyy-mm-dd` (no necesariamente el de creación). */
+  date: string;
+  priority: NotePriority;
+  /** Si además de nota es un recordatorio con fecha/hora propias. */
+  hasAlert: boolean;
+  /** `yyyy-mm-dd`. `null` si `hasAlert` es `false`. */
+  alertDate: string | null;
+  /** `HH:mm`. `null` si `hasAlert` es `false`. */
+  alertTime: string | null;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface LinkDoc {
+  ownerId: string;
+  /** URL completa, ya normalizada (siempre con protocolo). */
+  url: string;
+  /** Metatags Open Graph resueltos al momento del alta (`addLinkAction`) — no se vuelven a pedir en cada lectura. */
+  title: string | null;
+  description: string | null;
+  /** URL absoluta de la imagen de preview (`og:image`/`twitter:image`), `null` si el sitio no publica una. */
+  image: string | null;
+  siteName: string | null;
+  /** Host sin `www.`, ej. "github.com" — evita parsear `url` en el cliente sólo para mostrarlo. */
+  domain: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 /** Mapea cada colección con la forma de sus documentos. */
 export interface CollectionTypes {
   [COLLECTIONS.users]: UserDoc;
@@ -137,6 +175,8 @@ export interface CollectionTypes {
   [COLLECTIONS.expenseCycles]: ExpenseCycleDoc;
   [COLLECTIONS.expenseMovements]: ExpenseMovementDoc;
   [COLLECTIONS.expenseCategories]: ExpenseCategoriesDoc;
+  [COLLECTIONS.notes]: NoteDoc;
+  [COLLECTIONS.links]: LinkDoc;
 }
 
 /* ------------------------------------------------------------------ *

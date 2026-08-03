@@ -98,6 +98,7 @@ export const SCREEN_HEADERS: Record<string, ScreenHeader> = {
   [ROUTES.miniAppCalculadoraPropinas]: { title: "Calculadora de propinas", back: true },
   [ROUTES.miniAppSplitGastos]: { title: "Split de gastos", back: true },
   [ROUTES.miniAppGeneradorQr]: { title: "Generador de QR", back: true },
+  [ROUTES.miniAppLinks]: { title: "Links guardados", back: true },
 };
 
 export function headerFor(pathname: string): ScreenHeader {

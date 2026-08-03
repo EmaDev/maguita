@@ -2,14 +2,14 @@ import "server-only";
 import { dayKey } from "@/lib/home-model";
 import { getActiveExpenseCycle, getExpenseMovements, type ExpenseCycle } from "./expenses";
 import { getExpenseCategories, type ExpenseCategoryItem } from "./expense-categories";
+import { getNotes } from "./notes";
 
 /**
  * Datos de la pantalla de Inicio: movimientos, notas y hábitos.
  *
- * Igual que el resto de `lib/data`, es la fuente única de la pantalla y hoy
- * devuelve las tres colecciones vacías: la app está sin datos a propósito
- * hasta que exista el backend. Acá va el fetch/query real, y los tipos ya son
- * los definitivos, así que enchufarlo no obliga a tocar los paneles.
+ * Igual que el resto de `lib/data`, es la fuente única de la pantalla. Hábitos
+ * todavía devuelve la colección vacía (sin backend); movimientos y notas ya
+ * salen de Firestore.
  */
 
 export interface Movement {
@@ -26,12 +26,20 @@ export interface Movement {
   local?: boolean;
 }
 
+export type NotePriority = "low" | "medium" | "high";
+
 export interface Note {
   id: string;
   text: string;
-  /** Día en que se escribió, `yyyy-mm-dd`. */
+  /** Día al que corresponde la nota, `yyyy-mm-dd` (no necesariamente el de creación). */
   date: string;
-  local?: boolean;
+  priority: NotePriority;
+  /** Si además de nota es un recordatorio con fecha/hora propias. */
+  hasAlert: boolean;
+  /** `yyyy-mm-dd`. `null` si `hasAlert` es `false`. */
+  alertDate: string | null;
+  /** `HH:mm`. `null` si `hasAlert` es `false`. */
+  alertTime: string | null;
 }
 
 export interface Habit {
@@ -61,21 +69,22 @@ export interface HomeData {
 }
 
 /**
- * Notas y hábitos todavía no tienen backend (`_userId` no filtra nada ahí),
- * pero el gestor de gastos sí: sus movimientos son los del ciclo activo del
- * usuario, si tiene uno.
+ * Hábitos todavía no tienen backend (`_userId` no filtra nada ahí). El
+ * gestor de gastos y las notas sí: los movimientos son los del ciclo activo
+ * del usuario (si tiene uno), y las notas son todas las suyas.
  */
 export async function getHomeData(userId: string): Promise<HomeData> {
-  const [expenseCycle, expenseCategories] = await Promise.all([
+  const [expenseCycle, expenseCategories, notes] = await Promise.all([
     getActiveExpenseCycle(userId),
     getExpenseCategories(userId),
+    getNotes(userId),
   ]);
   const movements = expenseCycle ? await getExpenseMovements(expenseCycle.id) : [];
 
   return {
     today: dayKey(new Date()),
     movements,
-    notes: [],
+    notes,
     habits: [],
     expenseCycle,
     expenseCategories,

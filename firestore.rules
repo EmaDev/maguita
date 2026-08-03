@@ -57,6 +57,20 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Notas de la tab Notas. Id autogenerado, mismo criterio por campo que
+    // expenseCycles/expenseMovements.
+    match /notes/{noteId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // Links guardados de la mini-app de links. Id autogenerado, mismo
+    // criterio por campo que notes/expenseCycles.
+    match /links/{linkId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
     /* Firestore ya deniega lo que ninguna regla permita — las reglas se
        combinan con OR, así que este bloque no restringe nada. Queda explícito
        para dejar claro que una colección nueva arranca cerrada hasta que se le

@@ -20,6 +20,8 @@ una descripción). Ver también la nota en `AGENTS.md`.
 | `expenseCycles` | autogenerado | `src/lib/firebase/collections.ts` → `ExpenseCycleDoc` |
 | `expenseMovements` | autogenerado | `src/lib/firebase/collections.ts` → `ExpenseMovementDoc` |
 | `expenseCategories` | `uid` de Firebase Auth | `src/lib/firebase/collections.ts` → `ExpenseCategoriesDoc` |
+| `notes` | autogenerado | `src/lib/firebase/collections.ts` → `NoteDoc` |
+| `links` | autogenerado | `src/lib/firebase/collections.ts` → `LinkDoc` |
 
 ```mermaid
 erDiagram
@@ -68,12 +70,36 @@ erDiagram
         object_array categories "id, name, emoji — ABM del usuario"
         timestamp updatedAt
     }
+    NOTES {
+        string ownerId
+        string text
+        string date "yyyy-mm-dd, día de creación — no editable"
+        string priority "low | medium | high"
+        boolean hasAlert
+        string alertDate "yyyy-mm-dd, nullable — sólo si hasAlert"
+        string alertTime "HH:mm, nullable — sólo si hasAlert"
+        timestamp createdAt
+        timestamp updatedAt
+    }
+    LINKS {
+        string ownerId
+        string url "URL completa, ya normalizada con protocolo"
+        string title "nullable, og:title o <title> del sitio"
+        string description "nullable, og:description o meta description"
+        string image "nullable, URL absoluta de og:image/twitter:image"
+        string siteName "nullable, og:site_name"
+        string domain "host sin www., ej. github.com"
+        timestamp createdAt
+        timestamp updatedAt
+    }
     USERS ||--o| FAVORITES : "mismo uid, colecciones separadas a propósito"
     USERS ||--o{ PASSWORD_RESET_CODES : "por email, de un solo uso"
     USERS ||--o{ EXPENSE_CYCLES : "ownerId, sólo uno active a la vez"
     USERS ||--o| EXPENSE_CATEGORIES : "mismo uid"
     EXPENSE_CYCLES ||--o{ EXPENSE_MOVEMENTS : "cycleId"
     EXPENSE_CATEGORIES ||--o{ EXPENSE_MOVEMENTS : "category/categoryEmoji copiados al alta, sin FK"
+    USERS ||--o{ NOTES : "ownerId"
+    USERS ||--o{ LINKS : "ownerId"
 ```
 
 `users` y `favorites` **se mantienen separadas** aunque ambas cuelgan del
@@ -258,6 +284,132 @@ Decisiones de diseño:
   actualizado evita un segundo viaje a Firestore sólo para refrescar la
   lista en pantalla.
 
+### `notes/{noteId}`
+
+Notas de la tab **Notas** de Inicio: alta libre con prioridad y, opcionalmente,
+una alerta con fecha/hora propias (distinta de `date`, que es el día al que
+corresponde la nota). Id autogenerado, mismo criterio de dueño por campo que
+`expenseCycles`/`expenseMovements` — muchas notas por usuario, no un array
+único como `favorites`/`expenseCategories`.
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `ownerId` | `string` | uid del dueño |
+| `text` | `string` | cuerpo de la nota |
+| `date` | `string` | `yyyy-mm-dd`, el día en que se creó — sin selector en el composer ni en la edición |
+| `priority` | `"low" \| "medium" \| "high"` | ordena el filtro de la grilla de notas |
+| `hasAlert` | `boolean` | si además de nota es un recordatorio |
+| `alertDate` / `alertTime` | `string \| null` | `yyyy-mm-dd` / `HH:mm`, ambos `null` si `hasAlert` es `false` |
+| `createdAt` / `updatedAt` | `Timestamp` | — |
+
+Accesores: `getNotes` (`src/lib/data/notes.ts`, sólo Server Components);
+`addNoteAction`, `updateNoteAction`, `deleteNoteAction`
+(`src/lib/data/notes-actions.ts`, Server Actions — re-verifican la sesión).
+`updateNoteAction`/`deleteNoteAction` comparten `getOwnedNoteRef` (trae la
+nota y valida `ownerId`) y `assertValidNoteFields` (mismas validaciones que
+`addNoteAction`), igual criterio que `getOwnedActiveCycle` en
+`expenses-actions.ts`.
+
+Decisiones de diseño:
+
+- **`date` no es un campo del formulario.** El composer no tiene selector de
+  fecha (se sacó a pedido: sólo prioridad y alerta) — `addNoteAction` recibe
+  el `today` que ya resuelve el server y lo guarda tal cual. `updateNoteAction`
+  tampoco lo deja editar: reenvía el `note.date` original sin tocarlo. Sigue
+  siendo su propio campo (no `createdAt` recortado a día) porque `createdAt`
+  es un `Timestamp` de bookkeeping — sirve para auditoría, no para agrupar
+  "Hoy"/"Ayer" en la UI sin parsear un Timestamp en cada render.
+- **`hasAlert` + `alertDate`/`alertTime` en vez de un solo campo de
+  fecha-hora.** Guardar dos strings planos (mismo criterio que `date` en
+  todo el resto del archivo: nunca un `Date`/`Timestamp` para lo que el
+  cliente sólo necesita mostrar o comparar como texto) evita tener que
+  parsear un ISO combinado en la UI sólo para separar el `DatePicker` de la
+  hora. `hasAlert` queda de todos modos como campo propio (no "alertDate no
+  nulo") porque es más barato de leer en la UI (`note.hasAlert` directo, sin
+  inferir un booleano de dos nullables) y dominios futuros (ej. desactivar
+  una alerta sin borrar la fecha) no obligan a tocar el resto de la forma.
+- **Sin `orderBy` en la consulta.** `getNotes` filtra sólo por `ownerId`
+  (`==`) y ordena en memoria con `byDayDesc` — mismo criterio que
+  `getExpenseMovements`, evita un índice compuesto que hoy no hace falta. El
+  orden y los filtros de la tab (campo + dirección asc/desc, prioridad, con o
+  sin alerta) son sólo de UI: `sortNotes` (`src/lib/home-model.ts`) y un
+  `filter` se aplican sobre la lista ya traída, sin volver a pedirle nada a
+  Firestore. La colección entera del usuario ya viaja en `data.notes`, así que
+  filtrar del lado del server no ahorraría ninguna lectura.
+- **Editar y borrar no piden campos nuevos.** `updateNoteAction` reemplaza
+  todos los campos editables a la vez (no hay `PATCH` parcial) y no toca
+  `createdAt`; `deleteNoteAction` borra el documento entero, sin soft-delete
+  — no hay pantalla de "notas borradas" que lo necesite.
+- **El borrado masivo saltea lo ajeno en vez de cortar.** `deleteNotesAction`
+  valida dueño documento por documento y descarta en silencio lo que no sea
+  del usuario: los ids los manda el cliente, y fallar distinto según "no
+  existe" o "no es tuyo" delataría qué ids existen. Si al final no quedó
+  ninguna propia sí tira error, para que un borrado que no borró nada no se
+  vea como exitoso. Va en un `WriteBatch` (atómico) con un tope de 500, que
+  es el límite de Firestore — por UI es imposible llegar, pero el largo del
+  array lo decide el cliente.
+
+### `links/{linkId}`
+
+Links guardados de la mini-app privada **Links guardados**
+(`/mini-apps/links`): alta libre por URL, con preview (título, descripción,
+imagen) resuelto una sola vez al guardar. Id autogenerado, mismo criterio de
+dueño por campo que `notes`/`expenseCycles` — muchos links por usuario.
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `ownerId` | `string` | uid del dueño |
+| `url` | `string` | URL completa, ya normalizada (siempre con protocolo — `addLinkAction` le agrega `https://` si el usuario no lo tipeó) |
+| `title` | `string \| null` | `og:title` o, si no hay, el `<title>` del sitio. `null` si el fetch falló o el sitio no tiene ninguno |
+| `description` | `string \| null` | `og:description` o `meta[name=description]` |
+| `image` | `string \| null` | URL absoluta de `og:image`/`twitter:image` (resuelta contra la URL final tras redirects) |
+| `siteName` | `string \| null` | `og:site_name` |
+| `domain` | `string` | host de `url` sin `www.` — evita parsear la URL en el cliente sólo para mostrarlo |
+| `createdAt` / `updatedAt` | `Timestamp` | — |
+
+Accesores: `getLinks` (`src/lib/data/links.ts`, sólo Server Components),
+`addLinkAction` / `deleteLinkAction` (`src/lib/data/links-actions.ts`, Server
+Actions — re-verifican la sesión y, en el borrado, el dueño del documento).
+
+Decisiones de diseño:
+
+- **El preview se resuelve una sola vez, en el alta, no en cada lectura.**
+  `addLinkAction` llama a `fetchLinkMetadata`
+  (`src/lib/data/link-metadata.ts`) y guarda `title`/`description`/`image`/
+  `siteName` ya resueltos en el documento — `getLinks` sólo lee Firestore, no
+  vuelve a pedirle nada al sitio de terceros. Evita repetir un fetch externo
+  (lento, y puede fallar) cada vez que el usuario abre la mini-app; el
+  costo es que si el sitio cambia su preview después, el link guardado no se
+  actualiza solo (no hay refresco automático, ver "Fuera de alcance" abajo).
+- **Sin librería de parsing HTML.** `fetchLinkMetadata` recorta `<head>` del
+  HTML descargado y extrae metatags con regex en vez de sumar una dependencia
+  (`cheerio` u similar) — alcanza porque sólo le interesan metatags Open
+  Graph, que siempre vienen bien formados por los sitios que los publican; no
+  necesita un parser DOM completo.
+- **Protecciones porque la URL la manda el usuario y el fetch corre en el
+  server (riesgo de SSRF).** Antes de pedir cada URL (la original y cada
+  redirect, hasta 3), `fetchLinkMetadata` resuelve el hostname y descarta
+  cualquier IP privada/loopback/link-local/CGNAT (rangos `10.0.0.0/8`,
+  `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.168.0.0/16`,
+  `100.64.0.0/10`, sus equivalentes IPv6, y hostnames `localhost`/`*.local`)
+  — sin esto, la mini-app se podría usar para sondear la red interna del
+  servidor pasándole una URL que apunte para adentro. Los redirects se siguen
+  a mano (`redirect: "manual"` + loop propio) en vez de dejar que `fetch` los
+  siga solo, precisamente para poder validar cada salto — si no, un sitio
+  público podría redirigir a una IP interna y saltearse el chequeo del primer
+  hop. Además: sólo `http`/`https`, timeout de 6s, sólo `content-type:
+  text/html`, y tope de 500KB leídos del body (alcanza para `<head>`, evita
+  bajar una página entera). Cualquier fallo en cualquiera de estos pasos
+  devuelve metadata vacía — no rechaza el alta, el link se guarda igual sólo
+  que sin preview.
+- **`domain` se calcula y guarda en el alta, no se deriva de `url` en la
+  UI.** Mismo criterio que `category`/`categoryEmoji` en `expenseMovements`:
+  un campo denormalizado barato de leer en la card en vez de parsear la URL
+  con `new URL()` en cada render del cliente.
+- **Sin edición.** Sólo alta + listado + borrado — no hay forma de corregir a
+  mano un preview que salió mal (ej. un sitio sin metatags), sólo borrar y
+  volver a guardar.
+
 ### `passwordResetCodes/{hash}`
 
 | Campo | Tipo | Notas |
@@ -331,6 +483,16 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /notes/{noteId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /links/{linkId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
@@ -350,6 +512,268 @@ documento entero, campos nuevos incluidos — Firestore no tiene reglas a
 nivel de campo para lectura.
 
 ## Changelog
+
+### 2026-08-02 — Nueva mini-app privada "Links guardados"
+
+- Nueva colección **`links/{linkId}`** (ver sección de arriba para la forma
+  completa y las decisiones de diseño, en particular las protecciones contra
+  SSRF del fetch de metadata). Guarda enlaces por URL con preview (título,
+  descripción, imagen) sacado de sus metatags Open Graph al momento del alta.
+  Nuevo `getLinks` (`src/lib/data/links.ts`, sólo Server Components) y
+  `addLinkAction` / `deleteLinkAction` (`src/lib/data/links-actions.ts`,
+  Server Actions), mismo patrón lectura/escritura que `notes.ts`/
+  `notes-actions.ts`. Sin `orderBy`: filtra sólo por `ownerId` y ordena en
+  memoria por `createdAt`, mismo criterio que el resto del archivo.
+- Nuevo `fetchLinkMetadata` (`src/lib/data/link-metadata.ts`): recorta
+  `<head>` del HTML descargado y extrae `og:title`/`og:description`/
+  `og:image`/`og:site_name` (con fallback a `<title>`/meta description/
+  `twitter:image`) con regex, sin sumar una dependencia de parsing HTML.
+  Sigue redirects a mano (hasta 3 saltos) validando cada uno, en vez de
+  dejarle el seguimiento a `fetch` — necesario para que el chequeo de IPs
+  privadas no se salte con un redirect. Si el fetch falla por lo que sea
+  (timeout, host privado, no-HTML, red), `addLinkAction` igual guarda el link
+  con la URL y el dominio como único dato, sin bloquear el alta.
+- Nueva pantalla `/mini-apps/links`
+  (`src/app/(app)/mini-apps/links/page.tsx` + `SavedLinks`,
+  `src/components/organisms/mini-apps/SavedLinks.tsx`): un `Input` para
+  pegar la URL arriba, y abajo una grilla de `MediaCard` (de
+  `lib-kit-components`) con la imagen de preview, título y descripción de
+  cada link — tocar la card la abre en una pestaña nueva
+  (`window.open(url, "_blank", "noopener,noreferrer")`), un botón de borrar
+  con `TrashIcon` corta la propagación del click para no abrir el link de
+  paso. Nueva entrada en el catálogo de mini-apps
+  (`src/lib/data/mini-apps.ts`, id `links-guardados`, categoría
+  Productividad, `requiresAuth: true`) y nuevos `LinkIcon`/`ExternalLinkIcon`
+  en `src/components/atoms/icons.tsx` (`LinkIcon` se suma también al mapeo de
+  `MiniAppIcon`, que ganó la clave `"link"` en el tipo `MiniApp["icon"]`).
+  `ROUTES.miniAppLinks` nueva en `src/lib/app-config.ts`, sumada a
+  `PROTECTED_ROUTES`; header propio (`back: true`) en
+  `src/components/shell/nav-config.tsx`.
+- **Nuevo bloque de reglas en `firestore.rules`** (pegado también en la
+  sección de arriba, "Reglas objetivo"):
+  ```
+  match /links/{linkId} {
+    allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    allow write: if false;
+  }
+  ```
+  Mismo criterio que `notes`/`expenseCycles`: id autogenerado, así que el
+  dueño se valida por campo (`ownerId`) en vez de por id de documento.
+  Pendiente de publicar contra el proyecto real, igual que el resto de
+  `firestore.rules` (ver ⚠️ arriba).
+- **Fuera de alcance a propósito**: no hay edición de un link ya guardado (si
+  el preview salió mal, hay que borrar y volver a cargarlo); el preview no se
+  refresca solo si el sitio cambia sus metatags después del alta; no hay
+  carpetas, tags ni orden manual — la grilla siempre es más reciente
+  primero; no hay import/export masivo de enlaces.
+
+### 2026-08-01 — Tab Notas con backend real: prioridad, alerta, edición/borrado y grilla animada
+
+- Nueva colección **`notes/{noteId}`** (ver sección de arriba para la forma
+  completa y las decisiones de diseño). Antes las notas del FAB
+  (`useNoteDrafts`, `lib/data/local-drafts.ts`) sólo quedaban en
+  `localStorage`, marcadas `local: true` y mezcladas en el cliente con
+  `data.notes` (que `getHomeData` siempre devolvía vacío) — un holdover de
+  antes de que existiera backend, mismo estado en el que hoy sigue
+  `useExpenseDrafts` para gastos hasta que se migró (ver "El FAB de Inicio
+  guarda 'Nuevo gasto' en el gestor de gastos", más abajo). Ahora las notas
+  se guardan en Firestore igual que el resto de la app.
+- `Note` (`src/lib/data/home.ts`) gana `priority: "low" | "medium" |
+  "high"`, `hasAlert: boolean`, `alertDate: string | null` y `alertTime:
+  string | null`; pierde `local?: boolean` (ya no hay nada que marcar como
+  "todavía no llegó al servidor"). Sin título: se evaluó agregarlo pero se
+  sacó del alcance antes de terminar la entrada — una nota es sólo texto +
+  metadata, sin campo libre adicional. Nuevo `getNotes`
+  (`src/lib/data/notes.ts`, sólo Server Components) y `addNoteAction`
+  (`src/lib/data/notes-actions.ts`, Server Action) siguiendo el mismo patrón
+  lectura/escritura que `expenses.ts`/`expenses-actions.ts`. `getHomeData`
+  pasa a pedir `getNotes(userId)` en el mismo `Promise.all` que el gestor de
+  gastos, en vez de devolver `notes: []` fijo.
+- **El composer se mudó del FAB al header de la tab Notas.** Antes "Nueva
+  nota" abría un sheet chico (sólo texto) desde el FAB global de Inicio;
+  ahora `NoteComposer`
+  (`src/components/organisms/home/NoteComposer.tsx`) vive siempre visible
+  arriba de `NotesPanel`: un `Textarea` grande arriba y, debajo, los dos
+  controles que quedan en vez de todos los campos apilados de una. La
+  **prioridad** es un chip que abre un `Popover` con las tres opciones y se
+  cierra al elegir. La **alerta** es un `Switch` al lado, que al prenderse
+  despliega `DatePicker` + `TimePicker` debajo. Pasó por dos iteraciones
+  antes de llegar ahí: primero era un chip que abría un popover con un
+  `Switch` adentro (dos toques para un booleano), después el chip mismo hacía
+  de toggle (un toque, pero un chip no se lee como interruptor), y terminó
+  siendo el `Switch` a secas. Prenderlo
+  preselecciona hoy como fecha: si quedara vacía, el formulario queda
+  inválido sin que se vea por qué (el botón de guardar se apaga y la fecha
+  recién aparece más abajo). Sin chip de fecha de la nota a pedido: se guarda
+  con el `today` del server, sin selector — ver la decisión de diseño de
+  `date` en la sección de arriba. Se sacó del FAB porque cargar
+  una nota completa (con alerta) no entra en un sheet chico sin quedar
+  apretado, y porque es la acción principal de esa tab — no tiene sentido
+  esconderla atrás de un botón flotante que además hay que abrir desde otra
+  tab. `quick-actions.tsx` perdió `NewNoteSheet` (sólo le queda
+  `ShareAppSheet`) y `local-drafts.ts` se borró entero: sin notas, no le
+  quedaba nada adentro. Nuevos `CalendarIcon` / `FlagIcon` en
+  `src/components/atoms/icons.tsx`; label/tono de cada prioridad se comparten
+  entre el chip del composer y el badge de la grilla desde
+  `src/components/organisms/home/note-priority.ts`.
+- **"Nueva nota" volvió al FAB, pero sin sheet propio.** La acción
+  (`HomeBoard.tsx`) cambia a la tab Notas y enfoca el composer que ya vive
+  arriba, en vez de abrir otro formulario: duplicarlo en un sheet
+  significaría mantener dos composers con el mismo estado. El puente es un
+  **contador** (`focusSignal`, de `HomeBoard` a `NotesPanel` a
+  `NoteComposer`) y no un booleano — estando ya parado en la tab Notas, un
+  flag que ya vale `true` no volvería a disparar el foco. El composer lo mira
+  en un efecto y hace `focus()` + `scrollIntoView()`; arranca en 0, así que
+  no se roba el foco al montarse la pantalla.
+- `NotesPanel` (`src/components/organisms/home/NotesPanel.tsx`) reemplaza la
+  lista vertical por una grilla de post-it (ver más abajo) con una
+  **`ProductFilterBar`** arriba: campo de orden (Fecha / Prioridad) con
+  toggle asc/desc, panel de filtros por prioridad y por con/sin alerta, y el
+  contador de resultados. Es controlada y **no filtra ni ordena por vos** —
+  eso lo hace `NotesPanel` con un `filter` + `sortNotes`
+  (`src/lib/home-model.ts`, reemplaza a la vieja `byPriorityDesc`: ahora hay
+  que poder ordenar en las dos direcciones, no sólo descendente). Los `count`
+  de cada faceta se cuentan sobre la lista completa y no sobre la ya
+  filtrada: si se descontaran solos al tildarlos, el panel dejaría de servir
+  para saber qué más hay.
+- **Nuevo bloque de reglas en `firestore.rules`** (pegado también en la
+  sección de arriba, "Reglas objetivo"):
+  ```
+  match /notes/{noteId} {
+    allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    allow write: if false;
+  }
+  ```
+  Mismo criterio que `expenseCycles`/`expenseMovements`: id autogenerado, así
+  que el dueño se valida por campo (`ownerId`) en vez de por id de documento.
+  Pendiente de publicar contra el proyecto real, igual que el resto de
+  `firestore.rules` (ver ⚠️ arriba).
+- **El detalle es el mismo post-it, en grande.** Cada card de la grilla abre
+  `NoteDetailModal` (`src/components/organisms/home/NoteDetailModal.tsx`):
+  papel del color de su prioridad, esquina doblada y todo, centrado sobre un
+  backdrop. **No usa el `Modal` de la librería** — ese trae su propia
+  superficie (`surface`, header y footer con bordes) y no hay forma de que se
+  lea como papel. El overlay se arma a mano con el mismo patrón que
+  `shell/notification-drawer.tsx` (backdrop `z-[140]` + panel `z-[150]`,
+  bloqueo del scroll del body, foco al abrir, cierre con Escape o tocando
+  afuera), que es lo que ya hace la app cuando la librería no tiene el
+  contenedor que hace falta.
+- **Editar y borrar salieron de la botonera a un menú de tres puntitos**
+  (`MoreIcon`, nuevo en `icons.tsx`, sobre el `Dropdown` de la librería con
+  "Eliminar" en `destructive`): el papel queda limpio y las dos acciones
+  aparecen sólo cuando se las busca. El menú se renderiza en la cabecera,
+  fuera del área scrolleable del panel — adentro, el `overflow-y-auto` le
+  recortaría el desplegable. Borrar sigue confirmando en el mismo panel, sin
+  apilar otro encima: las tres caras (ver / editar / confirmar) son un único
+  estado `mode` y se cruzan con `AnimatePresence mode="wait"`.
+- **Animaciones del detalle**: el papel entra como si se apoyara (baja, se
+  agranda y se endereza desde −2°, con spring) y sale girando apenas para el
+  otro lado; el backdrop hace fade con blur; el contenido cruza con un fade +
+  desplazamiento corto al cambiar de cara. Se evaluó una transición de
+  elemento compartido (`layoutId`) para que el post-it de la grilla se
+  expandiera en el del detalle, pero la card ya combina `layout` con `rotate`
+  en capas separadas justamente porque no conviven, y sumarle un tercer nodo
+  compartido rotado era la receta para que se deformara en el medio: no valía
+  el riesgo contra una entrada con spring que se ve bien y no puede romperse.
+- Volver el panel a "ver" al cerrarse se hace en la función `close()` que
+  usan todos los caminos de cierre, no en un efecto sobre `note`: un
+  `setState` dentro de un efecto dispara renders en cascada y el eslint del
+  repo lo rechaza. Con el backdrop puesto no se puede abrir otra nota sin
+  cerrar la actual, así que no hace falta más que eso.
+- `note` se recibe como prop derivada de la lista (`notes.find(...)` en
+  `NotesPanel`), no copiada aparte: al guardar una edición o al borrar, el
+  `revalidatePath` de la Server Action refresca `data.notes` y el modal
+  muestra el texto nuevo (o se cierra solo, si ya no está) sin lógica extra
+  de sincronización. Nuevos `updateNoteAction` / `deleteNoteAction`
+  (`src/lib/data/notes-actions.ts`), con un `getOwnedNoteRef` que centraliza
+  "traer + validar dueño" — mismo criterio que `getOwnedActiveCycle` en
+  `expenses-actions.ts` — y `assertValidNoteFields` factoreado de
+  `addNoteAction` para no duplicar las validaciones entre alta y edición.
+  Nuevo `NoteEditor` (`src/components/organisms/home/NoteEditor.tsx`): los
+  mismos campos que `NoteComposer` pero en un form apilado — mismo criterio
+  de "cada uno con su propio estado, sin compartir un hook" que ya usan
+  `ExpenseCycleForm`/`ExpenseCycleEditor`. Se edita sobre el papel de color:
+  los inputs traen su propio fondo `surface`, así que se leen como campos
+  apoyados sobre la nota y no hace falta cambiarle el color al panel para
+  entrar en modo edición.
+- **Grilla animada de post-it, en una o dos columnas.** Las notas dejaron de
+  ser `Card` de la librería: son papel: fondo de color según prioridad,
+  `rounded-sm`, `shadow-lg`, esquina doblada (un triángulo `foreground/10`
+  recortado con `clip-path`) y una inclinación de ±0.8°. La inclinación sale
+  del id de la nota (`tiltOf`), no del índice — atada a la posición, cambiar
+  el orden o borrar una nota le movería el ángulo a todas las demás. Sobre el
+  papel de color no van los chips de `NOTE_PRIORITY_TONE` (están pensados
+  para `surface`): la meta se escribe en `foreground/65`, que se invierte
+  solo con el tema igual que el papel.
+- **Tres tokens nuevos en `globals.css`** (`--color-note-high` / `-medium` /
+  `-low`), con su variante en `.dark`: en claro son pasteles y en oscuro los
+  mismos hues apagados — un pastel claro sobre el fondo casi negro encandila
+  y encima invertiría el texto, que sigue siendo `foreground`. El mapa
+  prioridad → clase vive en `note-priority.ts` (`NOTE_PRIORITY_PAPER`) con
+  las clases escritas enteras: Tailwind escanea el fuente como texto, así que
+  un `bg-note-${x}` armado en runtime no generaría ninguna de las tres.
+  `NoteDetailModal` usa el mismo papel para el cuerpo de la nota, así abrirla
+  no le hace perder la identidad con la que se la venía viendo en la grilla.
+- **El color no es el único portador de la prioridad**: la card sigue
+  escribiendo "Alta"/"Media"/"Baja" al pie. Es lo que la mantiene legible con
+  daltonismo — y de paso hace que el papel se pueda leer de un vistazo sin
+  tener que recordar qué significaba cada color.
+- La animación (`framer-motion`, ya dependencia directa — mismo patrón que
+  `shell/notification-drawer.tsx`) va en **dos capas anidadas a propósito**:
+  la de afuera lleva `layout` + entrada/salida (fade y slide-up escalonado
+  por índice, fade al borrar), la de adentro el `rotate` y el hover (se
+  endereza y se levanta). `layout` y `rotate` en el mismo nodo no conviven:
+  framer deforma el contenido al interpolar la posición de algo rotado.
+- **Selección múltiple para borrar de a varias.** Un botón de tilde al lado
+  del selector de columnas entra en modo selección: los post-it dejan de
+  abrir el detalle y pasan a marcarse (anillo `primary` + tilde en la
+  esquina, los no marcados atenuados), y aparece una barra con el conteo,
+  "Todas"/"Ninguna", "Cancelar" y "Eliminar". Borrar confirma en la misma
+  barra antes de ejecutar — es la acción más destructiva de la pantalla y es
+  fácil llegar a ella con muchas notas marcadas. Nueva Server Action
+  `deleteNotesAction` (ver arriba).
+- Lo que se borra es la **intersección de lo seleccionado con lo visible**
+  (`selectedVisible`), no el set crudo: sin eso, marcar tres notas, cambiar
+  el filtro y tocar "Eliminar" se llevaría notas que no están en pantalla. Y
+  como se calcula en cada render, no hace falta ningún efecto que limpie la
+  selección cuando cambian los filtros.
+- Nuevo selector de **1 o 2 columnas** (`ColumnOneIcon` / `ColumnTwoIcon` en
+  `icons.tsx`), al lado de la `ProductFilterBar`, con la elección persistida
+  en `localStorage` (`usePersistentState`, clave `maguita:notas-columnas`,
+  SSR-safe) — es una preferencia de lectura, no algo para volver a elegir en
+  cada visita. La grilla pasó de `grid-cols-1 sm:grid-cols-2` fijo a
+  `gridTemplateColumns` inline, y como las cards tienen `layout`, cambiar de
+  columnas las reacomoda animadas en vez de saltar. Va afuera de la barra
+  porque `ProductFilterBar` no expone ningún slot para sumarle un control
+  propio, y porque la densidad de la grilla no es un filtro: no cambia qué
+  notas se ven, sólo cómo. Se evaluó `CardGrid` de la librería (hace
+  exactamente esto, con persistencia incluida) pero su chrome de controles —
+  label "Columnas" + caja −/+ **y** pills numeradas — es demasiado para una
+  elección binaria que acá entra en dos íconos.
+- **El panel del `TimePicker` se abre hacia arriba** en el composer y en el
+  editor. El componente no expone hacia qué lado abrirlo: lo posiciona
+  `absolute` sin `top` ni `bottom`, así que siempre cae debajo del input — y
+  en las dos pantallas es el último campo del formulario, con lo cual el
+  panel se abre contra el borde de abajo. `TIME_PICKER_UPWARD`
+  (`note-priority.ts`) lo da vuelta desde el `className` del propio
+  componente, con variantes arbitrarias que apuntan a su único hijo directo
+  `absolute` (el panel; label, input y hint no lo son). Es un parche sobre
+  markup ajeno, así que queda en una constante compartida y comentada: si la
+  librería suma un prop de posición, se borra de un lugar solo.
+- **`lib-kit-components` actualizado** (`37b64c3` → `23eae87`): `TimePicker` y
+  `ProductFilterBar` ya existían upstream pero el checkout de `node_modules`
+  estaba viejo, así que la primera versión de esta pantalla los había suplido
+  con un `Input type="time"` y un `Select`. De paso el paquete cambió de
+  forma: ya no publica `components/` con el fuente, sólo `dist/` — el
+  `@source "…/lib-kit-components/dist"` de `globals.css` sigue apuntando bien
+  (verificado: las clases que sólo usa la librería, como el `z-[95]` del
+  `Popover`, siguen apareciendo en el CSS compilado).
+- **Fuera de alcance a propósito**: la alerta se guarda pero no dispara
+  ninguna notificación todavía (no hay integración con push/notificaciones
+  del navegador) — es sólo el dato, para cuando exista ese mecanismo; y las
+  referencias a `NewNoteSheet`/`useNoteDrafts` en entradas de este changelog
+  anteriores a esta quedan tal cual estaban al escribirse, como registro
+  histórico.
 
 ### 2026-08-01 — Fix: "Nuevo gasto" del FAB no cerraba el sheet ni avisaba al guardar
 

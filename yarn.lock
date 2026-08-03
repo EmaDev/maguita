@@ -3035,7 +3035,7 @@ levn@^0.4.1:
 
 "lib-kit-components@github:EmaDev/kit-componentes":
   version "0.1.0"
-  resolved "git+ssh://git@github.com/EmaDev/kit-componentes.git#37b64c3c02b3eb465a1acc9c3f2d35b840ac0093"
+  resolved "git+ssh://git@github.com/EmaDev/kit-componentes.git#23eae87c9a5427ae03ee269b9fa86d8f1cd26cbb"
 
 lightningcss-win32-x64-msvc@1.32.0:
   version "1.32.0"

@@ -19,7 +19,7 @@ const MAX_DIGITS = 9;
  * del FAB de Inicio, que no expone ninguna forma de cerrarse desde adentro de
  * su `content`. Por eso no depende de `useAppSheet()` acá — `onSaved` es
  * opcional y cada caller decide qué hacer al guardar (cerrar su sheet, o
- * nada, como ya hace `NewNoteSheet` cuando se abre desde el FAB).
+ * nada).
  *
  * El monto se carga con un `Keypad` directo adentro del sheet (no con
  * `AmountPad`, que es un overlay a pantalla completa aparte): los pesos acá

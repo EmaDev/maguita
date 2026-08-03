@@ -31,6 +31,15 @@
   --color-success: #15803d;
   --color-danger: #dc2626;
 
+  /* Papeles de los post-it de la tab Notas, uno por prioridad. Pasteles bien
+     claros: el texto va en `foreground`, que sobre estos tres da de sobra el
+     4.5:1. El color no es el único portador del dato — la card también
+     escribe "Alta"/"Media"/"Baja", que es lo que la hace legible con
+     daltonismo. */
+  --color-note-high: #ffd7de;
+  --color-note-medium: #fdefbe;
+  --color-note-low: #d7f0e2;
+
   --font-sans: var(--font-app-sans), "Inter", system-ui, sans-serif;
 }
 
@@ -49,6 +58,14 @@
   --color-border: #3b2830;
   --color-success: #4ade80;
   --color-danger: #f87171;
+
+  /* Los mismos tres papeles, apagados: un pastel claro sobre el fondo casi
+     negro encandila, y encima invertiría el texto (que sigue siendo
+     `foreground`, claro en oscuro). Conservan el hue para que la nota se
+     reconozca igual al cambiar de tema. */
+  --color-note-high: #4d222b;
+  --color-note-medium: #47401f;
+  --color-note-low: #1f3b2e;
 }
 
 /* ============================

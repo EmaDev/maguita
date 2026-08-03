@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { Button, FloatingButton, usePersistentState, type FabAction } from "lib-kit-components";
 import { NoteIcon, ReceiptIcon, ShareIcon } from "@/components/atoms/icons";
 import { useAppSheet } from "@/components/shell/app-sheet";
 import { useShellTabs } from "@/components/shell/shell-tabs";
-import { NewNoteSheet, ShareAppSheet } from "@/components/organisms/quick-actions";
+import { ShareAppSheet } from "@/components/organisms/quick-actions";
 import { APP_NAME } from "@/lib/app-config";
 import { HabitsPanel } from "./home/HabitsPanel";
 import { MovementsPanel } from "./home/MovementsPanel";
@@ -14,7 +14,6 @@ import { NotesPanel } from "./home/NotesPanel";
 import { SummaryPanel } from "./home/SummaryPanel";
 import { isHomeTab, type HomeTab } from "./home/tabs";
 import type { Habit, HomeData } from "@/lib/data/home";
-import { noteFromDraft, useNoteDrafts } from "@/lib/data/local-drafts";
 import { byDayDesc } from "@/lib/home-model";
 
 /**
@@ -32,7 +31,7 @@ import { byDayDesc } from "@/lib/home-model";
  * `switch` de abajo) se mantiene visible al cambiar de tab sin desmontarse.
  */
 
-/** Días marcados en este dispositivo, por hábito. Constante: ver `local-drafts`. */
+/** Días marcados en este dispositivo, por hábito. Constante de módulo: pasarle un `{}` nuevo en cada render al hook lo re-inicializaría. */
 const NO_HABIT_LOG: Record<string, string[]> = {};
 
 /**
@@ -60,21 +59,26 @@ export function HomeBoard({ data }: { data: HomeData }) {
   const active: HomeTab = isHomeTab(tab) ? tab : "resumen";
   const { openSheet, closeSheet } = useAppSheet();
 
-  // Altas del FAB: notas todavía no tienen backend, así que se mezclan con los
-  // datos del server para que lo recién cargado no desaparezca. El hook es
-  // SSR-safe (devuelve la lista vacía hasta hidratar), así que la mezcla no
-  // rompe el primer render. Los gastos ya van directo a Firestore (ver
-  // `quickActions` más abajo), así que no hay nada que mezclar ahí.
-  const [noteDrafts] = useNoteDrafts();
   const [habitLog, setHabitLog] = usePersistentState<Record<string, string[]>>(
     "maguita:habitos",
     NO_HABIT_LOG
   );
 
-  const notes = useMemo(
-    () => byDayDesc([...noteDrafts.map(noteFromDraft), ...data.notes]),
-    [noteDrafts, data.notes]
-  );
+  /**
+   * Un contador, no un booleano: "Nueva nota" tiene que poder enfocar el
+   * composer también cuando ya estamos parados en la tab Notas, y un booleano
+   * que ya está en `true` no dispararía nada la segunda vez.
+   */
+  const [noteFocusSignal, setNoteFocusSignal] = useState(0);
+
+  const focusNewNote = useCallback(() => {
+    setTab("notas");
+    setNoteFocusSignal((signal) => signal + 1);
+  }, [setTab]);
+
+  // Notas ya van directo a Firestore (ver `NoteComposer`, en el header de la
+  // tab): acá sólo se ordenan para el resumen, sin mezclar ningún borrador.
+  const notes = useMemo(() => byDayDesc(data.notes), [data.notes]);
 
   const habits = useMemo<Habit[]>(
     () =>
@@ -104,33 +108,20 @@ export function HomeBoard({ data }: { data: HomeData }) {
     [setHabitLog, today]
   );
 
-  // Lo usan tanto el FAB (`quickActions` de abajo) como el `onAdd` de
-  // `NotesPanel`: un único callback, un único sheet. El resto de los sheets
-  // del gestor de gastos (categorías, tope/fechas, finalizar) sólo tienen
-  // sentido parados sobre un ciclo ya elegido en Movimientos, así que viven
-  // ahí y no en el FAB.
-  const openNewNote = useCallback(
-    () =>
-      openSheet(<NewNoteSheet />, {
-        title: "Nueva nota",
-        description: "Anotá algo rápido antes de que se te olvide.",
-      }),
-    [openSheet]
-  );
-
   /**
-   * Las tres acciones del FAB abren el mismo sheet global que usan
-   * Movimientos y Notas (`useAppSheet()`), no el `<FabActionSheets>` de la
-   * librería: ese monta sus tres `BottomSheet` propios y no expone ninguna
-   * forma de cerrarlos desde adentro de su `content` — con `openSheet` acá,
-   * "Nuevo gasto" puede pasarle `onSaved={closeSheet}` a
-   * `NewExpenseMovementSheet` (ver ese componente) y cerrarse solo al
-   * guardar, igual que ya hacía desde Movimientos.
+   * "Nuevo gasto" y "Compartir" abren el mismo sheet global que usa
+   * Movimientos (`useAppSheet()`), no el `<FabActionSheets>` de la librería:
+   * ese monta sus propios `BottomSheet` y no expone ninguna forma de
+   * cerrarlos desde adentro de su `content` — con `openSheet` acá, "Nuevo
+   * gasto" puede pasarle `onSaved={closeSheet}` a `NewExpenseMovementSheet`
+   * (ver ese componente) y cerrarse solo al guardar, igual que ya hacía desde
+   * Movimientos. "Nueva nota" es la excepción: no abre ningún sheet, lleva al
+   * composer que ya vive arriba de la tab Notas y lo enfoca.
    *
    * Depende de `data.expenseCycle`/`data.expenseCategories`: a diferencia de
-   * notas y compartir, "Nuevo gasto" no es estático — sin ciclo activo no hay
-   * contra qué cargar un gasto, así que el sheet cambia por un aviso. Por eso
-   * el array ya no es una constante de módulo (no puede serlo y depender de
+   * compartir, "Nuevo gasto" no es estático — sin ciclo activo no hay contra
+   * qué cargar un gasto, así que el sheet cambia por un aviso. Por eso el
+   * array ya no es una constante de módulo (no puede serlo y depender de
    * props a la vez).
    */
   const quickActions = useMemo<FabAction[]>(
@@ -138,7 +129,10 @@ export function HomeBoard({ data }: { data: HomeData }) {
       {
         icon: <NoteIcon />,
         label: "Nueva nota",
-        onClick: openNewNote,
+        // No abre un sheet con otro composer: lleva al que ya está siempre
+        // visible arriba de la tab Notas y lo enfoca. Duplicarlo en un sheet
+        // significaría mantener dos formularios con el mismo estado.
+        onClick: focusNewNote,
       },
       {
         icon: <ReceiptIcon />,
@@ -167,7 +161,15 @@ export function HomeBoard({ data }: { data: HomeData }) {
         onClick: () => openSheet(<ShareAppSheet />, { title: `Compartir ${APP_NAME}` }),
       },
     ],
-    [data.expenseCategories, data.expenseCycle, today, setTab, openNewNote, openSheet, closeSheet]
+    [
+      data.expenseCategories,
+      data.expenseCycle,
+      today,
+      setTab,
+      openSheet,
+      closeSheet,
+      focusNewNote,
+    ]
   );
 
   let panel: ReactNode;
@@ -183,7 +185,7 @@ export function HomeBoard({ data }: { data: HomeData }) {
       );
       break;
     case "notas":
-      panel = <NotesPanel today={today} notes={notes} onAdd={openNewNote} />;
+      panel = <NotesPanel today={today} notes={notes} focusSignal={noteFocusSignal} />;
       break;
     case "habitos":
       panel = <HabitsPanel today={today} habits={habits} onToggle={toggleHabit} />;

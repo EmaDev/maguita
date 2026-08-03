@@ -18,6 +18,7 @@ export const ROUTES = {
   miniAppSplitGastos: "/mini-apps/split-gastos",
   miniAppGeneradorQr: "/mini-apps/generador-qr",
   miniAppGeneradorQrTexto: "/mini-apps/generador-qr/texto",
+  miniAppLinks: "/mini-apps/links",
   login: "/login",
   signin: "/signin",
   recuperar: "/recuperar-password",
@@ -30,6 +31,7 @@ export const PROTECTED_ROUTES = [
   ROUTES.asistente,
   ROUTES.ajustes,
   ROUTES.miniAppSplitGastos,
+  ROUTES.miniAppLinks,
 ] as const;
 
 /** Pantallas de autenticación: si ya hay sesión, no tiene sentido mostrarlas. */

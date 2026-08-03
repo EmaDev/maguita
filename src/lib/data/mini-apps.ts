@@ -12,7 +12,7 @@ export interface MiniApp {
   description: string;
   category: "Finanzas" | "Productividad" | "Utilidades";
   /** Nombre del ícono en components/atoms/icons */
-  icon: "wallet" | "qr" | "calculator" | "clock" | "grid" | "sparkle";
+  icon: "wallet" | "qr" | "calculator" | "clock" | "grid" | "sparkle" | "link";
   /** Requiere sesión para abrirse. */
   requiresAuth: boolean;
   /**
@@ -82,6 +82,15 @@ const MINI_APPS: MiniApp[] = [
     icon: "qr",
     requiresAuth: false,
     path: ROUTES.miniAppGeneradorQr,
+  },
+  {
+    id: "links-guardados",
+    name: "Links guardados",
+    description: "Guardá enlaces con su preview y abrilos cuando quieras.",
+    category: "Productividad",
+    icon: "link",
+    requiresAuth: true,
+    path: ROUTES.miniAppLinks,
   },
 ];
 
