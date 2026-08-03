@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { ROUTES } from "@/lib/app-config";
 import { requireSession } from "@/lib/auth/dal";
 import { adminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, collection, now } from "@/lib/firebase/collections";
+import { COLLECTIONS, Timestamp, collection, now } from "@/lib/firebase/collections";
 import type { NotePriority } from "./home";
 
 export interface NoteFieldsInput {
@@ -15,15 +15,52 @@ export interface NoteFieldsInput {
   /** Requeridos si `hasAlert` es `true`. */
   alertDate?: string | null;
   alertTime?: string | null;
+  /**
+   * Instante absoluto de la alerta en ms (`alertInstant`, calculado en el
+   * cliente). Requerido si `hasAlert` es `true`: sin él el recordatorio se
+   * guarda pero el cron no lo puede encontrar.
+   */
+  alertAtMs?: number | null;
 }
+
+/**
+ * Ventana en la que se acepta un `alertAtMs`. El valor lo calcula el cliente
+ * con su propio reloj, así que puede venir de un dispositivo con la hora mal
+ * puesta; el rango descarta lo absurdo (un recordatorio para 1970, o para
+ * dentro de un siglo) sin pretender validar el huso, que es justamente lo que
+ * el server no puede saber.
+ */
+const MAX_ALERT_AGE_MS = 365 * 24 * 60 * 60 * 1000;
+const MAX_ALERT_HORIZON_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 
 /** Valida los campos comunes al alta y a la edición de una nota. */
 function assertValidNoteFields(input: NoteFieldsInput): void {
   if (!input.text.trim()) throw new Error("Escribí algo antes de guardar la nota.");
   if (!input.date) throw new Error("Elegí una fecha para la nota.");
-  if (input.hasAlert && (!input.alertDate || !input.alertTime)) {
+  if (!input.hasAlert) return;
+
+  if (!input.alertDate || !input.alertTime) {
     throw new Error("Completá la fecha y la hora de la alerta.");
   }
+  const alertAtMs = input.alertAtMs;
+  if (typeof alertAtMs !== "number" || !Number.isFinite(alertAtMs)) {
+    throw new Error("No se pudo interpretar la fecha y hora de la alerta.");
+  }
+  const now = Date.now();
+  if (alertAtMs < now - MAX_ALERT_AGE_MS || alertAtMs > now + MAX_ALERT_HORIZON_MS) {
+    throw new Error("La fecha de la alerta está fuera de rango.");
+  }
+}
+
+/** Los tres campos de la alerta, resueltos juntos: o van los tres, o van los tres en `null`. */
+function alertFieldsOf(input: NoteFieldsInput) {
+  return input.hasAlert
+    ? {
+        alertDate: input.alertDate!,
+        alertTime: input.alertTime!,
+        alertAt: Timestamp.fromMillis(input.alertAtMs!),
+      }
+    : { alertDate: null, alertTime: null, alertAt: null };
 }
 
 /**
@@ -58,8 +95,7 @@ export async function addNoteAction(input: AddNoteInput): Promise<void> {
     date: input.date,
     priority: input.priority,
     hasAlert: input.hasAlert,
-    alertDate: input.hasAlert ? input.alertDate! : null,
-    alertTime: input.hasAlert ? input.alertTime! : null,
+    ...alertFieldsOf(input),
     createdAt: now(),
     updatedAt: now(),
   });
@@ -82,8 +118,7 @@ export async function updateNoteAction(input: UpdateNoteInput): Promise<void> {
     date: input.date,
     priority: input.priority,
     hasAlert: input.hasAlert,
-    alertDate: input.hasAlert ? input.alertDate! : null,
-    alertTime: input.hasAlert ? input.alertTime! : null,
+    ...alertFieldsOf(input),
     updatedAt: now(),
   });
 

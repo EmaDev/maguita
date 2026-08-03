@@ -3,7 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { ROUTES } from "@/lib/app-config";
 import { requireSession } from "@/lib/auth/dal";
-import { COLLECTIONS, FieldValue, collection, now } from "@/lib/firebase/collections";
+import {
+  COLLECTIONS,
+  FieldValue,
+  collection,
+  now,
+  type HabitDoc,
+} from "@/lib/firebase/collections";
+import { streakOf } from "@/lib/home-model";
+import { notifyQuietly } from "@/lib/notifications/notify";
 
 /** Tope del nombre. El mismo número lo usa el `maxLength` del composer. */
 const MAX_NAME_LENGTH = 60;
@@ -61,14 +69,16 @@ function assertValidDay(day: string): void {
  * barrera real contra que una sesión válida toque el hábito de otra cuenta
  * pasando su `id`.
  */
-async function getOwnedHabitRef(id: string, ownerId: string) {
+async function getOwnedHabit(id: string, ownerId: string) {
   const ref = collection(COLLECTIONS.habits).doc(id);
   const snapshot = await ref.get();
   const habit = snapshot.data();
   if (!habit || habit.ownerId !== ownerId) {
     throw new Error("Ese hábito ya no existe.");
   }
-  return ref;
+  // Devuelve también el documento (no sólo la referencia) porque el aviso de
+  // racha necesita `doneDates`, `name` y `emoji`, y ya están leídos acá.
+  return { ref, habit };
 }
 
 export type AddHabitInput = HabitFieldsInput;
@@ -118,13 +128,53 @@ export async function toggleHabitDayAction(
   const session = await requireSession(ROUTES.inicio);
   assertValidDay(day);
 
-  const ref = await getOwnedHabitRef(habitId, session.sub);
+  const { ref, habit } = await getOwnedHabit(habitId, session.sub);
   await ref.update({
     doneDates: done ? FieldValue.arrayUnion(day) : FieldValue.arrayRemove(day),
     updatedAt: now(),
   });
 
+  if (done) {
+    await notifyStreakMilestone(session.sub, habitId, habit, day);
+  }
+
   revalidatePath(ROUTES.inicio);
+}
+
+/**
+ * Rachas que se festejan. Más allá de 365 no hay hito: a esa altura el aviso
+ * dejó de ser noticia y pasaría a ser ruido anual.
+ */
+const STREAK_MILESTONES = [7, 30, 100, 365] as const;
+
+/**
+ * Avisa cuando marcar el día lleva la racha justo a un hito.
+ *
+ * La racha se calcula acá con `streakOf` sobre el array que ya trajo
+ * `getOwnedHabit` más el día recién marcado, en vez de releer el documento
+ * después del `update()`: es la misma cuenta que hace la UI y ahorra la
+ * segunda lectura. Sólo avisa en el valor **exacto** del hito, no en "mayor o
+ * igual" — con `>=` cada día siguiente a los 7 volvería a entrar (la
+ * `dedupeKey` lo frenaría igual, pero por el camino largo).
+ */
+async function notifyStreakMilestone(
+  userId: string,
+  habitId: string,
+  habit: HabitDoc,
+  day: string
+): Promise<void> {
+  const doneDates = [...(habit.doneDates ?? []), day];
+  const streak = streakOf(doneDates, day);
+  if (!STREAK_MILESTONES.includes(streak as (typeof STREAK_MILESTONES)[number])) return;
+
+  await notifyQuietly({
+    userId,
+    topic: "habits.streak",
+    title: `${habit.emoji} ${streak} días seguidos`,
+    description: `Llevás ${streak} días sin fallar con «${habit.name}». No la cortes ahora.`,
+    href: ROUTES.inicio,
+    dedupeKey: `${habitId}:${streak}`,
+  });
 }
 
 export interface UpdateHabitInput extends HabitFieldsInput {
@@ -136,7 +186,7 @@ export async function updateHabitAction(input: UpdateHabitInput): Promise<void> 
   const session = await requireSession(ROUTES.inicio);
   assertValidHabitFields(input);
 
-  const ref = await getOwnedHabitRef(input.id, session.sub);
+  const { ref } = await getOwnedHabit(input.id, session.sub);
   await ref.update({
     name: input.name.trim(),
     emoji: input.emoji,
@@ -150,7 +200,7 @@ export async function updateHabitAction(input: UpdateHabitInput): Promise<void> 
 /** Borra un hábito y, con él, todo su historial de días cumplidos. */
 export async function deleteHabitAction(habitId: string): Promise<void> {
   const session = await requireSession(ROUTES.inicio);
-  const ref = await getOwnedHabitRef(habitId, session.sub);
+  const { ref } = await getOwnedHabit(habitId, session.sub);
   await ref.delete();
   revalidatePath(ROUTES.inicio);
 }

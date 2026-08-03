@@ -11,7 +11,6 @@ import {
   PwaStatus,
   Switch,
   formatBytes,
-  useNotificationPermission,
   usePersistentState,
   useStorageEstimate,
   useSnackbar,
@@ -27,41 +26,34 @@ export function SettingsPanel({
   user,
   avatarUrl,
   logoutAction,
+  devTools = false,
 }: {
   user: CurrentUser;
   avatarUrl: string | null;
   /** Server Action de cierre de sesión, pasada desde el Server Component. */
   logoutAction: () => Promise<void>;
+  /**
+   * `DEV_TOOLS=true` en el server. Baja como prop y no se lee de una variable
+   * `NEXT_PUBLIC_`: la flag vive sólo del lado del server (ver `lib/dev-tools.ts`),
+   * y esconder el link es cosmético — el gate real es el `notFound()` de la
+   * pantalla y el `assertDevTools()` de cada acción.
+   */
+  devTools?: boolean;
 }) {
   const router = useRouter();
   const { snack } = useSnackbar();
-  const notifications = useNotificationPermission();
   const storage = useStorageEstimate();
   // Contador, no booleano: `PwaInstallPrompt` con `forcePlatform` se cierra con
   // estado interno propio y sólo lo resetea al cambiar `forcePlatform`. Cambiar
   // la `key` lo remonta, así se puede volver a abrir después de cerrarlo.
   const [iosHelpKey, setIosHelpKey] = useState(0);
+  /* El permiso de notificaciones ya no se pide desde acá: vive en
+     `/ajustes/notificaciones`, junto al alta de la suscripción push y a las
+     preferencias por tipo de aviso. Pedirlo suelto en esta pantalla dejaba al
+     usuario con el permiso concedido pero sin ninguna suscripción del lado del
+     server, o sea sin recibir nada. */
   const [haptics, setHaptics] = usePersistentState("maguita:haptics", true);
   const [reduceData, setReduceData] = usePersistentState("maguita:reduce-data", false);
-
-  async function toggleNotifications(next: boolean) {
-    if (!next) {
-      // El navegador no permite revocar un permiso desde la página.
-      snack({
-        message: "Quitá el permiso desde los ajustes del navegador.",
-        variant: "info",
-      });
-      return;
-    }
-    const status = await notifications.request();
-    snack({
-      message:
-        status === "granted"
-          ? "Listo, vas a recibir notificaciones."
-          : "No se concedió el permiso de notificaciones.",
-      variant: status === "granted" ? "success" : "error",
-    });
-  }
 
   return (
     <div className="space-y-8">
@@ -85,6 +77,14 @@ export function SettingsPanel({
               onClick={() => router.push(ROUTES.editarPerfil)}
             >
               Editar perfil
+            </Button>
+
+            <Button
+              variant="outline"
+              fullWidth
+              onClick={() => router.push(ROUTES.notificaciones)}
+            >
+              Notificaciones
             </Button>
 
             {/* form + Server Action: el logout borra la cookie httpOnly en el
@@ -133,19 +133,6 @@ export function SettingsPanel({
       <section>
         <SectionTitle>Preferencias</SectionTitle>
         <Card variant="outline" padding="md" className="space-y-4">
-          <Switch
-            checked={notifications.status === "granted"}
-            onChange={toggleNotifications}
-            disabled={notifications.status === "unsupported"}
-            label="Notificaciones"
-            description={
-              notifications.status === "unsupported"
-                ? "Este navegador no las soporta."
-                : notifications.status === "denied"
-                  ? "Bloqueadas: habilitalas desde el navegador."
-                  : "Avisos de resúmenes y recordatorios."
-            }
-          />
           <Switch
             checked={haptics}
             onChange={setHaptics}
@@ -217,6 +204,16 @@ export function SettingsPanel({
         {/* observeOnly: el service worker ya lo registra UpdatePrompt desde el
             shell, así que acá sólo lo miramos. */}
         <PwaStatus swUrl="/sw.js" observeOnly title="Estado de la PWA" />
+        {devTools && (
+          <Button
+            variant="outline"
+            fullWidth
+            className="mt-3"
+            onClick={() => router.push(ROUTES.debug)}
+          >
+            Herramientas de desarrollo
+          </Button>
+        )}
         <p className="mt-3 text-center text-xs text-muted">
           {APP_NAME} v{APP_VERSION}
         </p>

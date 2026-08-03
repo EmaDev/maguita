@@ -23,6 +23,9 @@ una descripción). Ver también la nota en `AGENTS.md`.
 | `notes` | autogenerado | `src/lib/firebase/collections.ts` → `NoteDoc` |
 | `links` | autogenerado | `src/lib/firebase/collections.ts` → `LinkDoc` |
 | `habits` | autogenerado | `src/lib/firebase/collections.ts` → `HabitDoc` |
+| `notifications` | autogenerado, o `sha256(uid:topic:dedupeKey)` | `src/lib/firebase/collections.ts` → `NotificationDoc` |
+| `pushSubscriptions` | `sha256(endpoint)` | `src/lib/firebase/collections.ts` → `PushSubscriptionDoc` |
+| `notificationPreferences` | `uid` de Firebase Auth | `src/lib/firebase/collections.ts` → `NotificationPreferencesDoc` |
 
 ```mermaid
 erDiagram
@@ -108,9 +111,46 @@ erDiagram
     USERS ||--o| EXPENSE_CATEGORIES : "mismo uid"
     EXPENSE_CYCLES ||--o{ EXPENSE_MOVEMENTS : "cycleId"
     EXPENSE_CATEGORIES ||--o{ EXPENSE_MOVEMENTS : "category/categoryEmoji copiados al alta, sin FK"
+    NOTIFICATIONS {
+        string ownerId
+        string topic "id del registro de topics"
+        string title
+        string description "nullable"
+        string tone "info | success | warning | danger | neutral"
+        string href "nullable, ruta interna"
+        boolean read
+        timestamp readAt "nullable"
+        timestamp createdAt
+        timestamp expiresAt "TTL, 30 días por defecto"
+    }
+    PUSH_SUBSCRIPTIONS {
+        string ownerId
+        string endpoint "URL del push service"
+        string p256dh "clave de cifrado de la suscripción"
+        string auth "secreto de autenticación"
+        string userAgent "nullable, recortado a 200"
+        string timeZone "nullable, IANA"
+        timestamp createdAt
+        timestamp updatedAt
+        timestamp lastSuccessAt "nullable"
+        number failureCount "a los 3 seguidos se borra la fila"
+    }
+    NOTIFICATION_PREFERENCES {
+        boolean pushEnabled "interruptor maestro"
+        object topics "override de push por topic"
+        object quietHours "enabled, from, to"
+        string timeZone "nullable, IANA"
+        timestamp updatedAt
+    }
     USERS ||--o{ NOTES : "ownerId"
     USERS ||--o{ LINKS : "ownerId"
     USERS ||--o{ HABITS : "ownerId"
+    USERS ||--o{ NOTIFICATIONS : "ownerId"
+    USERS ||--o{ PUSH_SUBSCRIPTIONS : "ownerId, una por navegador"
+    USERS ||--o| NOTIFICATION_PREFERENCES : "mismo uid"
+    NOTES ||--o{ NOTIFICATIONS : "alertDate/alertTime, vía el cron de dispatch"
+    HABITS ||--o{ NOTIFICATIONS : "hitos de racha"
+    EXPENSE_CYCLES ||--o{ NOTIFICATIONS : "umbrales del tope"
 ```
 
 `users` y `favorites` **se mantienen separadas** aunque ambas cuelgan del
@@ -310,7 +350,8 @@ corresponde la nota). Id autogenerado, mismo criterio de dueño por campo que
 | `date` | `string` | `yyyy-mm-dd`, el día en que se creó — sin selector en el composer ni en la edición |
 | `priority` | `"low" \| "medium" \| "high"` | ordena el filtro de la grilla de notas |
 | `hasAlert` | `boolean` | si además de nota es un recordatorio |
-| `alertDate` / `alertTime` | `string \| null` | `yyyy-mm-dd` / `HH:mm`, ambos `null` si `hasAlert` es `false` |
+| `alertDate` / `alertTime` | `string \| null` | `yyyy-mm-dd` / `HH:mm`, ambos `null` si `hasAlert` es `false`. Es lo que **muestra** la UI |
+| `alertAt` | `Timestamp \| null` | el mismo momento, absoluto: los dos campos de arriba resueltos en el huso del dispositivo que cargó la nota (`alertInstant`). Es por lo que **consulta** el cron de recordatorios |
 | `createdAt` / `updatedAt` | `Timestamp` | — |
 
 Accesores: `getNotes` (`src/lib/data/notes.ts`, sólo Server Components);
@@ -330,6 +371,16 @@ Decisiones de diseño:
   siendo su propio campo (no `createdAt` recortado a día) porque `createdAt`
   es un `Timestamp` de bookkeeping — sirve para auditoría, no para agrupar
   "Hoy"/"Ayer" en la UI sin parsear un Timestamp en cada render.
+- **La alerta se guarda dos veces: legible y absoluta.** `alertDate`/`alertTime`
+  son la hora *local de quien cargó la nota*, y sin su huso no se pueden
+  comparar contra ningún reloj — un server en UTC leyendo `"09:00"` dispara el
+  recordatorio a las 06:00 de Argentina. Por eso el cliente calcula además
+  `alertAt` (`alertInstant`, `src/lib/home-model.ts`), que es ese mismo momento
+  como instante absoluto: el navegador es el único que conoce su huso y su
+  horario de verano para esa fecha. Los strings quedan porque son lo que la UI
+  muestra sin parsear un `Timestamp` en cada render, y `alertAt` es lo único
+  por lo que consulta `dispatchNoteAlerts`. Se recalcula en cada guardado, así
+  que mover la alerta la reprograma.
 - **`hasAlert` + `alertDate`/`alertTime` en vez de un solo campo de
   fecha-hora.** Guardar dos strings planos (mismo criterio que `date` en
   todo el resto del archivo: nunca un `Date`/`Timestamp` para lo que el
@@ -480,6 +531,157 @@ Decisiones de diseño:
   sincronizada en cada toggle y a recalcularla igual cuando pasa la
   medianoche sin que nadie escriba nada.
 
+### `notifications/{notificationId}`, `pushSubscriptions/{hash}` y `notificationPreferences/{uid}`
+
+Sistema de notificaciones: la bandeja que alimenta la campana del shell, las
+suscripciones Web Push de cada navegador, y qué quiere recibir el usuario.
+
+**El punto de entrada es uno solo.** Ningún módulo escribe estas colecciones a
+mano: todo pasa por `notify()` (`src/lib/notifications/notify.ts`), que escribe
+la entrada de la bandeja, resuelve las preferencias y manda el push en la misma
+llamada. Una mini-app nueva sólo tiene que agregar su topic en
+`src/lib/notifications/topics.ts` y llamar a `notify()` — no toca ni el panel,
+ni el push, ni la pantalla de preferencias.
+
+```ts
+await notify({
+  userId,
+  topic: "expenses.limit-reached",   // id del registro de topics, tipado
+  title: "Te pasaste del tope",
+  description: "Llevás $120.000 de un tope de $100.000.",
+  href: ROUTES.inicio,
+  dedupeKey: `${cycleId}:over`,      // idempotencia: una sola vez por evento
+});
+```
+
+`notifications/{notificationId}`:
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `ownerId` | `string` | uid del destinatario |
+| `topic` | `NotificationTopicId` | id del registro de topics |
+| `title` | `string` | título de la fila y del aviso del sistema |
+| `description` | `string \| null` | cuerpo. En el push se recorta a 160 caracteres |
+| `tone` | `NotificationTone` | **copiado** del topic al emitir, no referenciado: si mañana el topic cambia de color, lo ya emitido no se repinta |
+| `href` | `string \| null` | ruta interna a la que lleva tocarla. Default: `/inicio` |
+| `read` / `readAt` | `boolean` / `Timestamp \| null` | — |
+| `createdAt` | `Timestamp` | ordena la bandeja |
+| `expiresAt` | `Timestamp \| null` | 30 días por defecto. Lo consume la **TTL policy** de Firestore, no la app |
+
+`pushSubscriptions/{sha256(endpoint)}`:
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `ownerId` | `string` | uid del dueño del navegador |
+| `endpoint` | `string` | URL del push service que devolvió `PushManager.subscribe` |
+| `p256dh` / `auth` | `string` | claves de cifrado de la suscripción. **Son el secreto**: con ellas se le puede mandar un push a ese navegador |
+| `userAgent` | `string \| null` | recortado a 200 caracteres, sólo para distinguir dispositivos en Ajustes |
+| `timeZone` | `string \| null` | zona IANA del dispositivo al suscribirse |
+| `createdAt` / `updatedAt` | `Timestamp` | — |
+| `lastSuccessAt` | `Timestamp \| null` | último push entregado |
+| `failureCount` | `number` | fallos seguidos; a los 3 se borra la fila |
+
+`notificationPreferences/{uid}`:
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `pushEnabled` | `boolean` | interruptor maestro del canal push |
+| `topics` | `Record<topicId, { push: boolean }>` | override por topic. Un topic ausente usa el `pushByDefault` del registro |
+| `quietHours` | `{ enabled, from, to }` | franja diaria sin push, `HH:mm` en hora local. Puede cruzar la medianoche |
+| `timeZone` | `string \| null` | zona IANA con la que se evalúa `quietHours` |
+| `updatedAt` | `Timestamp` | — |
+
+Accesores: `getNotifications` / `countUnreadNotifications` /
+`getNotificationPreferences` / `getPushDevices` (`src/lib/data/notifications.ts`,
+sólo Server Components); `markNotificationReadAction`,
+`markAllNotificationsReadAction`, `dismissNotificationAction`,
+`clearNotificationsAction`, `savePushSubscriptionAction`,
+`deletePushSubscriptionAction`, `deletePushDeviceAction`,
+`updateNotificationPreferencesAction`, `resetNotificationPreferencesAction` y
+`sendTestNotificationAction` (`src/lib/data/notifications-actions.ts`).
+La emisión no es una Server Action: es `notify()` / `notifyQuietly()`
+(`src/lib/notifications/notify.ts`), que nunca la llama el cliente.
+
+```mermaid
+sequenceDiagram
+    participant M as Módulo (Server Action)
+    participant N as notify()
+    participant FS as Firestore
+    participant WP as Push service
+    participant SW as sw.js
+    participant UI as Pestaña abierta
+
+    M->>N: notify({ userId, topic, title, dedupeKey })
+    N->>FS: create notifications/{sha256(uid:topic:dedupeKey)}
+    alt ya existía (mismo evento)
+        FS-->>N: ALREADY_EXISTS
+        N-->>M: { duplicate: true } — no manda push
+    else nueva
+        N->>FS: get notificationPreferences/{uid}
+        alt push apagado u horario de silencio
+            N-->>M: { pushSkipped } — queda sólo en la campana
+        else
+            N->>FS: get pushSubscriptions where ownerId==uid
+            N->>WP: sendWebPush(payload) por dispositivo
+            WP->>SW: push
+            SW->>SW: showNotification + setAppBadge
+            SW->>UI: postMessage(PUSH_RECEIVED)
+            UI->>UI: router.refresh() — la campana se actualiza sola
+        end
+    end
+```
+
+Decisiones de diseño:
+
+- **El panel no se puede silenciar; el push sí.** La preferencia por topic
+  gobierna sólo el push, y la entrada de la bandeja se escribe siempre. El
+  panel es el registro de lo que pasó: si se pudiera apagar, un evento quedaría
+  sin rastro en ningún lado, y el usuario ya puede descartarlo o vaciar la
+  bandeja. Además, con una sola dimensión configurable la `dedupeKey` tiene un
+  único lugar donde vivir (el propio documento de la bandeja) y no hace falta
+  un registro paralelo de "esto ya lo mandé".
+- **La idempotencia sale del id del documento, no de un flag.** Con
+  `dedupeKey`, el id es `sha256(uid:topic:dedupeKey)` y la emisión usa
+  `create()`, que falla si el documento ya existe — sin transacción, sin
+  lectura previa y sin campo extra que mantener. Es lo que hace que "llegaste
+  al tope" salga una vez por ciclo y no con cada gasto cargado después, y lo
+  que permite que el cron de alertas de notas corra cada 5 minutos sin
+  duplicar nada ni escribirle nada a la nota.
+- **`pushSubscriptions` está cerrada también para lectura**, a diferencia de
+  todas las demás colecciones del usuario. `p256dh` y `auth` son justamente lo
+  que hace falta para mandarle un push a ese navegador: no son datos del
+  usuario, son credenciales. El cliente tampoco las necesita — la suscripción
+  de *este* dispositivo se la pide al `pushManager`, no a Firestore — y la
+  lista de Ajustes la arma el server, que saltea las reglas.
+- **El id de la suscripción se deriva del endpoint.** Con id autogenerado, un
+  navegador que se vuelve a suscribir (tras un `unsubscribe`, o porque el push
+  service rotó la suscripción) dejaría dos filas apuntando al mismo destino, o
+  sea dos avisos idénticos por evento. Con `sha256(endpoint)`, el alta pisa la
+  fila anterior.
+- **Las suscripciones se limpian solas.** Un 404/410 del push service significa
+  que ese navegador ya no existe (PWA desinstalada, datos borrados, permiso
+  revocado): se borra en el acto. Los fallos de otro tipo, que pueden ser un
+  corte pasajero, se acumulan en `failureCount` y recién a los 3 seguidos
+  borran la fila. Sin esto la colección crecería para siempre con endpoints
+  muertos que cuestan un intento en cada emisión.
+- **El horario de silencio se evalúa con la zona del dispositivo, guardada.**
+  El server no conoce el huso del usuario (mismo problema que el `day` de
+  `habits`), así que la zona IANA la manda el cliente al guardar preferencias o
+  al suscribirse. Sin zona, `isWithinQuietHours` devuelve `false`: preferimos
+  avisar de más antes que silenciar en el huso equivocado.
+- **`orderBy` en Firestore, al revés que el resto del archivo.** `getNotifications`
+  es la única consulta de la app con `where` + `orderBy` sobre otro campo, y por
+  eso la única que pide un índice compuesto (`firestore.indexes.json`). Acá el
+  orden no es una preferencia de UI sino lo que define qué entra en el recorte
+  de 50: ordenar en memoria obligaría a bajar la colección entera justo para
+  descartarla.
+- **Push directo, sin Firebase Cloud Messaging.** El service worker ya escucha
+  el evento `push` crudo y el kit trae `usePushSubscription`, así que FCM sería
+  una capa de más. El motivo decisivo es otro: la consola de Firebase entrega
+  sólo la clave **pública** del par VAPID, y firmar el JWT desde nuestro server
+  necesita la privada. Por eso el par lo generamos nosotros (`yarn vapid`) y
+  vive en el `.env`.
+
 ### `passwordResetCodes/{hash}`
 
 | Campo | Tipo | Notas |
@@ -563,6 +765,25 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /habits/{habitId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /pushSubscriptions/{subscriptionId} {
+      allow read, write: if false;
+    }
+
+    match /notificationPreferences/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
@@ -582,6 +803,329 @@ documento entero, campos nuevos incluidos — Firestore no tiene reglas a
 nivel de campo para lectura.
 
 ## Changelog
+
+### 2026-08-03 — Sistema de notificaciones: bandeja real, Web Push y una API para que cualquier módulo avise
+
+**Qué cambió.** Tres colecciones nuevas — `notifications`, `pushSubscriptions`
+y `notificationPreferences` — y con ellas el sistema de notificaciones
+completo: la campana del shell deja de ser decorativa, aparece el push real, y
+queda una sola función (`notify()`) por la que cualquier mini-app puede avisar.
+
+Antes, `getNotifications` devolvía `[]` fijo y el `NotificationDrawer` guardaba
+leer/descartar en un `useState` que se perdía al recargar. El `push` handler ya
+existía en `sw.js`, pero no había nada del lado del server que mandara un push:
+la variable `NEXT_PUBLIC_FIREBASE_VAPID_KEY` del `.env.example` y el export
+`vapidKey` de `firebase/config.ts` nunca se usaron, y se eliminaron (ver la
+última decisión de abajo).
+
+**Por qué.** Los módulos que se fueron sumando (gastos, notas, hábitos) tienen
+eventos que valen un aviso —te pasaste del tope, venció el recordatorio, llegaste
+a 30 días de racha— y ninguno tenía dónde publicarlos. Resolverlo por módulo
+habría significado que cada uno se escribiera su propia bandeja, su propio
+opt-in de push y su propia pantalla de preferencias, o —más probable— que
+ninguno lo hiciera.
+
+```mermaid
+erDiagram
+    USERS ||--o{ NOTIFICATIONS : "ownerId"
+    USERS ||--o{ PUSH_SUBSCRIPTIONS : "ownerId, una por navegador"
+    USERS ||--o| NOTIFICATION_PREFERENCES : "mismo uid"
+    NOTIFICATIONS {
+        string ownerId
+        string topic "id del registro de topics"
+        string title
+        string description "nullable"
+        string tone "copiado del topic al emitir"
+        string href "nullable"
+        boolean read
+        timestamp readAt "nullable"
+        timestamp createdAt
+        timestamp expiresAt "TTL 30 días"
+    }
+    PUSH_SUBSCRIPTIONS {
+        string ownerId
+        string endpoint
+        string p256dh "credencial, no dato del usuario"
+        string auth
+        string userAgent "nullable"
+        string timeZone "nullable, IANA"
+        timestamp createdAt
+        timestamp updatedAt
+        timestamp lastSuccessAt "nullable"
+        number failureCount
+    }
+    NOTIFICATION_PREFERENCES {
+        boolean pushEnabled
+        object topics "override de push por topic"
+        object quietHours "enabled, from, to"
+        string timeZone "nullable, IANA"
+        timestamp updatedAt
+    }
+```
+
+**Decisión de diseño principal**: el punto de extensión es un **registro de
+topics** (`src/lib/notifications/topics.ts`) y una sola función de emisión
+(`notify()`). Agregar un aviso nuevo es agregar una entrada en ese registro y
+llamar a `notify({ topic: "<id>", ... })` — el tipo no compila si el id no
+existe. De ahí sale solo: la fila del panel, el push, el tono, y el interruptor
+propio en `/ajustes/notificaciones`, porque esa pantalla recorre el registro en
+vez de una lista escrita a mano. Ver la sección
+[`notifications` …](#notificationsnotificationid-pushsubscriptionshash-y-notificationpreferencesuid)
+para el resto de las decisiones (idempotencia por id de documento, limpieza de
+suscripciones muertas, horario de silencio, por qué el panel no se puede
+silenciar).
+
+**Lo demás que se tocó.**
+
+- **Emisión** — `notify()` / `notifyQuietly()` (`lib/notifications/notify.ts`),
+  el registro de topics, `preferences.ts` (resuelve overrides contra defaults,
+  mismo patrón que `DEFAULT_PREFERENCES`), `quiet-hours.ts` (puro: lo evalúan
+  el server y la UI) y `web-push.ts` (VAPID + `web-push`, nueva dependencia).
+  `notifyQuietly` traga los errores: que falle un aviso no puede hacer fallar
+  el alta de gasto que el usuario pidió.
+- **Emisores reales**, para que el sistema no quede teórico:
+  `addExpenseMovementAction` avisa al cruzar el 80% y el 100% del tope del
+  ciclo; `toggleHabitDayAction` avisa al llegar a 7/30/100/365 días de racha
+  (por eso `getOwnedHabitRef` pasó a `getOwnedHabit`, que devuelve también el
+  documento — `doneDates` ya estaba leído); y las alertas de notas, que
+  dependen del reloj y no de un click, salen de `dispatchNoteAlerts` vía
+  `POST /api/notifications/dispatch`, un route handler pensado para un cron
+  cada 5-15 minutos y autenticado con `NOTIFICATIONS_CRON_SECRET` (comparación
+  en tiempo constante; sin la variable, 401 siempre). Para eso `notes` sumó
+  `alertAt` — ver abajo.
+- **`notes` gana `alertAt: Timestamp | null`.** Sin él, el recordatorio sonaba
+  a la hora equivocada: `alertDate`/`alertTime` son la hora local de quien
+  cargó la nota y el cron los interpretaba con el reloj del server, o sea tres
+  horas antes para Argentina en un deploy en UTC. Ahora el cliente resuelve el
+  instante absoluto (`alertInstant`, `src/lib/home-model.ts`) y lo manda junto
+  con los strings, que siguen siendo lo que la UI muestra. De paso, la consulta
+  del cron pasó de escanear **todas** las notas con alerta de la base en cada
+  corrida a un rango sobre un solo campo (`alertAt` entre hace 24h y ahora):
+  una corrida sin vencimientos ahora no lee ningún documento, y le alcanza el
+  índice automático de Firestore. La corrida procesa hasta 100 alertas de a 8
+  en paralelo (`Promise.allSettled`: una que falla no se lleva puestas a las
+  otras, y como no se escribió su documento la vuelve a tomar la corrida
+  siguiente), con `maxDuration = 60` en el route handler — secuencial, cien
+  alertas tardarían minutos y Vercel corta la función antes de terminar.
+- **Panel** — `AppShell` reemplaza el `useState` por `useOptimistic` + Server
+  Actions: leer/descartar se ve al instante pero la lista real la sigue
+  mandando el server, así que una notificación emitida en otra pestaña o por un
+  cron aparece igual. Nuevo `NotificationSync`
+  (`components/shell/notification-sync.tsx`): escucha el `postMessage` que
+  `sw.js` manda al recibir un push y hace `router.refresh()`, y repite el
+  refresco al volver a primer plano tras 30s o más. Sin polling. El cajón
+  ganó `onItemClick` (navega al `href` y se cierra) y un pie que lleva a las
+  preferencias.
+- **`sw.js` v3** — el handler de `push` ahora además mantiene el badge del
+  ícono (`setAppBadge`) y avisa a las pestañas abiertas. Se bumpeó
+  `CACHE_VERSION` para que `UpdatePrompt` empuje la versión nueva: un service
+  worker viejo seguiría mostrando el aviso pero dejaría la campana
+  desactualizada.
+- **Pantalla `/ajustes/notificaciones`** — opt-in de push por dispositivo
+  (`usePushSubscription` del kit, con las Server Actions como `onSubscribe`/
+  `onUnsubscribe`), interruptor maestro, horario de silencio, un switch por
+  topic agrupado por módulo, lista de dispositivos con push activo, y un botón
+  de notificación de prueba que va con `force` (saltea preferencias y silencio
+  a propósito: la prueba tiene que probar el camino, no las preferencias).
+  El switch suelto de "Notificaciones" que había en Ajustes se sacó: pedía el
+  permiso del navegador sin crear ninguna suscripción del lado del server, o
+  sea que quedaba concedido y sin recibir nada. Ahora Ajustes linkea acá.
+- **Sin FCM** — `NEXT_PUBLIC_FIREBASE_VAPID_KEY` y el export `vapidKey` se
+  eliminaron. La consola de Firebase entrega sólo la clave pública del par, y
+  firmar el JWT de VAPID desde nuestro server necesita la privada; el par se
+  genera con `yarn vapid` (`scripts/generate-vapid-keys.mjs`) y va en
+  `NEXT_PUBLIC_VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`.
+
+**Reglas.** Las tres colecciones necesitan su propio `match`: sin él caían en
+el `match /{document=**}` final y quedaban cerradas. Bloques agregados a
+`firestore.rules` (pegados también arriba, en "Reglas objetivo"):
+
+```
+    // Bandeja de notificaciones. Id autogenerado (o derivado de la dedupeKey),
+    // mismo criterio por campo que notes/habits.
+    match /notifications/{notificationId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    /* Suscripciones Web Push. Cerradas también para lectura, a diferencia del
+       resto: el documento guarda el endpoint y las claves de cifrado de la
+       suscripción, que es exactamente lo que hace falta para mandarle un push
+       a ese navegador. El cliente no las necesita — la suscripción de *este*
+       dispositivo se la pide al `pushManager`, no a Firestore — y la lista de
+       dispositivos de Ajustes la arma el server (`getPushDevices`), que
+       saltea estas reglas. */
+    match /pushSubscriptions/{subscriptionId} {
+      allow read, write: if false;
+    }
+
+    // Preferencias de notificación. El id del documento es el uid, igual que
+    // expenseCategories/favorites.
+    match /notificationPreferences/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+```
+
+`pushSubscriptions` es la primera colección de datos de usuario que se cierra
+también para **lectura**: `p256dh`/`auth` no son datos del usuario, son las
+credenciales con las que se le manda un push a ese navegador.
+
+**Índices.** El primero del repo. `getNotifications` filtra por `ownerId` y
+ordena por `createdAt desc` con `limit(50)`, así que necesita un índice
+compuesto — es la única consulta de la app donde el orden decide *qué se trae*
+y no sólo cómo se muestra, por eso acá sí vale (el resto sigue ordenando en
+memoria). Se creó `firestore.indexes.json` y se lo enganchó en `firebase.json`:
+
+```json
+{
+  "collectionGroup": "notifications",
+  "queryScope": "COLLECTION",
+  "fields": [
+    { "fieldPath": "ownerId", "order": "ASCENDING" },
+    { "fieldPath": "createdAt", "order": "DESCENDING" }
+  ]
+}
+```
+
+Publicar con `firebase deploy --only firestore:indexes --project maguita-7832c`.
+
+⚠️ **Acciones pendientes de infraestructura** (nada de esto está hecho en el
+proyecto real):
+
+1. `yarn vapid` y cargar las claves en `.env.local` y en el deploy.
+2. Publicar reglas e índices.
+3. Configurar la **TTL policy** de Firestore sobre `notifications.expiresAt`
+   (Console → Firestore → Time-to-live). Sin ella el campo se escribe pero
+   nadie borra nada: la bandeja crece sin techo y `getNotifications` sólo la
+   recorta en la lectura.
+4. Programar el cron contra `POST /api/notifications/dispatch` con el header
+   `Authorization: Bearer $NOTIFICATIONS_CRON_SECRET`. Sin esto, las alertas de
+   notas nunca se disparan (el resto de los avisos sí, porque salen de acciones
+   del usuario). La frecuencia del cron **es** la precisión del recordatorio:
+   cada 5 minutos, una alerta de las 09:00 suena entre 09:00 y 09:05.
+
+   Con la app en **Vercel** y el scheduler en **Google Cloud** (el mismo
+   proyecto que ya usa Firestore — Cloud Scheduler es un producto de GCP, y un
+   proyecto de Firebase *es* un proyecto de GCP):
+
+   ```bash
+   gcloud scheduler jobs create http maguita-note-alerts \
+     --project=maguita-7832c \
+     --location=southamerica-east1 \
+     --schedule="*/5 * * * *" \
+     --time-zone="America/Argentina/Buenos_Aires" \
+     --uri="https://<host-de-vercel>/api/notifications/dispatch" \
+     --http-method=POST \
+     --headers="Authorization=Bearer <NOTIFICATIONS_CRON_SECRET>" \
+     --attempt-deadline=60s
+   ```
+
+   No hace falta una Cloud Function en el medio: el trabajo lo hace el route
+   handler, que es donde vive el código. Una función programada que sólo le
+   pegara a esa URL sería un salto de más — y una que hiciera el trabajo
+   duplicaría `notify()` y el registro de topics en otro deploy.
+
+   El `--time-zone` acá sólo afecta a cuándo corre el job (irrelevante con
+   `*/5`, que es cada cinco minutos siempre); la hora de cada recordatorio sale
+   de `alertAt`, que ya es absoluto.
+
+   **Cloud Scheduler pide facturación activada** (plan Blaze) en el proyecto,
+   aunque los primeros 3 jobs son gratis. Sin Blaze, cualquier cron externo que
+   sepa mandar un header sirve igual — el endpoint no depende de quién lo llame.
+5. **Migración de las notas con alerta ya existentes**: se crearon sin
+   `alertAt`, así que el cron no las encuentra (la consulta es un rango de
+   `Timestamp` y un campo ausente no entra en el índice). Se arreglan solas al
+   volver a guardar la nota desde su detalle; si hubiera muchas, hace falta un
+   backfill que las recorra asumiendo un huso — dato que esas notas no
+   registran.
+
+**Fuera de alcance a propósito**: no hay agrupación ni resumen ("3 gastos
+nuevos"); no hay notificaciones entre usuarios (todas son del sistema al
+dueño); no hay `action` en las entradas del panel (el kit lo soporta, pero
+todavía ningún aviso necesita un botón propio más allá de navegar al `href`); y
+el horario de silencio no pospone el push, lo descarta — cuando pasa la franja
+no se manda nada acumulado, el evento queda sólo en la campana.
+
+### 2026-08-03 — Fix: bucle infinito de redirects en `/login`
+
+**Qué cambió.** La decisión "ya hay sesión, andá a inicio" se movió del `proxy`
+(`src/proxy.ts`) al layout del route group `(auth)`
+(`src/app/(auth)/layout.tsx`), que la toma con `getCurrentSession()` — la
+verificación real de la firma de la session cookie. El `proxy` quedó con un
+único chequeo, el de rutas protegidas sin cookie. `AUTH_ROUTES` se eliminó de
+`src/lib/app-config.ts`: el route group ya define esas rutas y mantener la
+lista aparte era justo lo que se desincronizaba.
+
+**Por qué.** Las dos direcciones del redirect usaban fuentes de verdad
+distintas. El `proxy` sólo puede hacer un chequeo optimista (corre en cada
+request, incluidos los prefetch, así que no puede pagar el viaje de red de
+`verifySessionCookie`) y decidía con la **presencia** de la cookie; el
+`requireSession()` de los layouts protegidos decide con su **validez**. Con
+una cookie presente pero inválida — vencida, revocada, o emitida por otro
+proyecto de Firebase — las dos discrepaban y se rebotaban la request para
+siempre. La cookie mala no se limpia sola: `getSession()` devuelve `null` pero
+no puede borrarla, porque en el render de un Server Component no se pueden
+setear cookies.
+
+El caso que lo disparó acá es el tercero: `.env.local` apunta a
+`maguita-7832c`, y había emuladores corriendo con `--project maguita-test`. Una
+cookie que quedó en el browser firmada por un emisor distinto entra directo al
+bucle.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser (cookie inválida)
+    participant P as proxy
+    participant L as layout protegido
+    Note over B,L: ANTES — bucle
+    B->>P: GET /login
+    P-->>B: 307 /inicio (¿existe la cookie? sí)
+    B->>P: GET /inicio
+    P->>L: next() (¿existe la cookie? sí)
+    L-->>B: 307 /login (requireSession: firma inválida)
+    Note over B,L: ...y de nuevo, para siempre
+```
+
+```mermaid
+sequenceDiagram
+    participant B as Browser (cookie inválida)
+    participant P as proxy
+    participant L as layout
+    Note over B,L: AHORA — 1 hop y se detiene
+    B->>P: GET /inicio
+    P->>L: next() (¿existe la cookie? sí)
+    L-->>B: 307 /login?next=/inicio (requireSession: firma inválida)
+    B->>P: GET /login
+    P->>L: next() (el proxy ya no mira las pantallas de auth)
+    L-->>B: 200 (getCurrentSession() → null: renderiza el login)
+```
+
+**Decisión de diseño principal**: el `proxy` nunca decide que una sesión es
+*válida*, sólo que *falta*. Es la única asimetría que evita el desacuerdo: el
+peor caso de un falso positivo del proxy es una pantalla de login de más, y el
+falso negativo lo cubre `requireSession()`. La alternativa —verificar la firma
+en el `proxy`— es justo lo que la doc de Next 16 desaconseja
+(`node_modules/next/dist/docs/01-app/02-guides/authentication.md`, "Optimistic
+checks with Proxy"), porque correría en cada prefetch.
+
+**Reglas.** No hace falta cambiar nada en `firestore.rules`. El cambio es de
+routing y no toca colecciones, ni la forma de ningún documento, ni quién puede
+leer qué: la verificación de sesión que respalda las reglas
+(`requireSession()`, y el `request.auth` que ve Firestore) es exactamente la
+misma de antes. Sigue vigente el bloque final que cierra todo lo no declarado:
+
+```
+    /* Firestore ya deniega lo que ninguna regla permita — las reglas se
+       combinan con OR, así que este bloque no restringe nada. Queda explícito
+       para dejar claro que una colección nueva arranca cerrada hasta que se le
+       escriba su propio `match`. */
+    match /{document=**} {
+      allow read, write: if false;
+    }
+```
+
+**Índices.** Ninguno: el cambio no agrega queries.
 
 ### 2026-08-03 — Nueva colección `habits`: la tab Hábitos deja de ser local
 

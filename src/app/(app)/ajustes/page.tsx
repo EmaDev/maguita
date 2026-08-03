@@ -4,6 +4,7 @@ import { ROUTES } from "@/lib/app-config";
 import { logout } from "@/lib/auth/actions";
 import { requireSession, toCurrentUser } from "@/lib/auth/dal";
 import { getProfile } from "@/lib/data/profile";
+import { isDevToolsEnabled } from "@/lib/dev-tools";
 
 export const metadata: Metadata = { title: "Ajustes" };
 
@@ -16,6 +17,7 @@ export default async function AjustesPage() {
       user={toCurrentUser(session, profile)}
       avatarUrl={profile?.avatarUrl ?? null}
       logoutAction={logout}
+      devTools={isDevToolsEnabled()}
     />
   );
 }

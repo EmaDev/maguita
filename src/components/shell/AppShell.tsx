@@ -3,8 +3,10 @@
 import {
   useCallback,
   useMemo,
+  useOptimistic,
   useState,
   useSyncExternalStore,
+  useTransition,
   type ReactNode,
 } from "react";
 import Link from "next/link";
@@ -21,6 +23,7 @@ import {
   Tabs,
   UpdatePrompt,
   greetingFor,
+  useSnackbar,
   useSplash,
   useStatusBarColor,
   type AppNotification,
@@ -36,9 +39,16 @@ import { UserAvatar } from "@/components/molecules/UserAvatar";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { APP_NAME, APP_TAGLINE, APP_VERSION, ROUTES } from "@/lib/app-config";
 import type { CurrentUser } from "@/lib/auth/dal";
+import {
+  clearNotificationsAction,
+  dismissNotificationAction,
+  markAllNotificationsReadAction,
+  markNotificationReadAction,
+} from "@/lib/data/notifications-actions";
 import { AppSheetProvider } from "./app-sheet";
 import { AUTHED_NAV, GUEST_NAV, headerFor } from "./nav-config";
 import { NotificationDrawer } from "./notification-drawer";
+import { NotificationSync } from "./notification-sync";
 import { ShellSearchProvider } from "./shell-search";
 import { ShellTabsProvider } from "./shell-tabs";
 
@@ -56,6 +66,81 @@ interface AppShellProps {
 /* El saludo no cambia por ningún evento: nos suscribimos a nada. Definido a
    nivel de módulo para que la referencia sea estable entre renders. */
 const noSubscribe = () => () => {};
+
+/** Lo que el usuario puede hacerle a la bandeja desde el panel. */
+type InboxAction =
+  | { type: "read"; id: string }
+  | { type: "read-all" }
+  | { type: "dismiss"; id: string }
+  | { type: "clear" };
+
+function reduceInbox(items: AppNotification[], action: InboxAction): AppNotification[] {
+  switch (action.type) {
+    case "read":
+      return items.map((n) => (n.id === action.id ? { ...n, read: true } : n));
+    case "read-all":
+      return items.map((n) => ({ ...n, read: true }));
+    case "dismiss":
+      return items.filter((n) => n.id !== action.id);
+    case "clear":
+      return [];
+  }
+}
+
+interface NotificationInbox {
+  items: AppNotification[];
+  read: (id: string) => void;
+  readAll: () => void;
+  dismiss: (id: string) => void;
+  clear: () => void;
+}
+
+/**
+ * La bandeja del panel: lo que llega del layout (Server Component) más el
+ * cambio que el usuario acaba de hacer, aplicado antes de que el servidor
+ * conteste.
+ *
+ * Va con `useOptimistic` y no con `useState`: leer o descartar tiene que verse
+ * al instante (el usuario ya tocó la fila), pero la lista real la sigue
+ * mandando el servidor en cada revalidación — con `useState` habría dos copias
+ * y la del cliente pisaría a la del servidor, así que una notificación nueva
+ * emitida en otra pestaña no aparecería nunca. Acá el estado optimista dura lo
+ * que dura la Server Action y después vuelve a mandar el prop.
+ *
+ * Si la acción falla, el `catch` no revierte nada a mano: alcanza con que
+ * termine la transición para que el prop del servidor —que no cambió— vuelva a
+ * ser lo que se ve.
+ */
+function useNotificationInbox(initial: AppNotification[]): NotificationInbox {
+  const { snack } = useSnackbar();
+  const [, startTransition] = useTransition();
+  const [items, applyOptimistic] = useOptimistic(initial, reduceInbox);
+
+  const run = useCallback(
+    (action: InboxAction, persist: () => Promise<void>) => {
+      startTransition(async () => {
+        applyOptimistic(action);
+        try {
+          await persist();
+        } catch {
+          snack({ message: "No pudimos guardar el cambio.", variant: "error" });
+        }
+      });
+    },
+    [applyOptimistic, snack]
+  );
+
+  return useMemo(
+    () => ({
+      items,
+      read: (id) => run({ type: "read", id }, () => markNotificationReadAction(id)),
+      readAll: () => run({ type: "read-all" }, markAllNotificationsReadAction),
+      dismiss: (id) => run({ type: "dismiss", id }, () => dismissNotificationAction(id)),
+      clear: () => run({ type: "clear" }, clearNotificationsAction),
+    }),
+    [items, run]
+  );
+}
 
 /**
  * Saludo según la hora ("Buen día", "Buenas tardes", "Buenas noches").
@@ -184,10 +269,9 @@ function AppFrame({
     [pathname]
   );
 
-  // Estado local para que leer/descartar en el panel se refleje al instante.
-  const [notifications, setNotifications] = useState(initialNotifications);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const unread = notifications.filter((n) => !n.read).length;
+  const notifications = useNotificationInbox(initialNotifications);
+  const unread = notifications.items.filter((n) => !n.read).length;
 
   // Tiñe la barra de estado del sistema para que acompañe al tema activo.
   useStatusBarColor({ light: "#ffffff", dark: "#150c10" });
@@ -331,27 +415,39 @@ function AppFrame({
               padding lateral del contenedor sin necesidad. */}
           <BottomNav items={navItems} />
   
+          {/* Refresca la campana cuando la notificación no la disparó esta
+              pestaña (un push del server, otro dispositivo, un cron). */}
+          {authed && <NotificationSync unread={unread} />}
+
           {/* El panel de notificaciones en versión sidebar: entra desde el borde
               derecho a todo lo alto en vez de abrir un BottomSheet. */}
           <NotificationDrawer
             open={drawerOpen}
             onClose={() => setDrawerOpen(false)}
-            items={notifications}
+            items={notifications.items}
             title="Notificaciones"
             emptyTitle="Todo al día"
             emptyHint="Cuando pase algo importante te avisamos por acá."
-            onRead={(id: string) =>
-              setNotifications((prev) =>
-                prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-              )
+            onRead={notifications.read}
+            onReadAll={notifications.readAll}
+            onDismiss={notifications.dismiss}
+            onClear={notifications.clear}
+            // El panel no navega solo con `href`: expone el item y deja la
+            // decisión afuera. Cerramos el cajón antes de navegar, si no queda
+            // abierto tapando la pantalla a la que acaba de llevar.
+            onItemClick={(item: AppNotification) => {
+              setDrawerOpen(false);
+              if (item.href) router.push(item.href);
+            }}
+            footer={
+              <Link
+                href={ROUTES.notificaciones}
+                onClick={() => setDrawerOpen(false)}
+                className="block text-center text-sm text-muted hover:text-foreground py-1"
+              >
+                Configurar notificaciones
+              </Link>
             }
-            onReadAll={() =>
-              setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
-            }
-            onDismiss={(id: string) =>
-              setNotifications((prev) => prev.filter((n) => n.id !== id))
-            }
-            onClear={() => setNotifications([])}
           />
         </ShellSearchProvider>
       </div>

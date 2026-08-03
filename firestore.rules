@@ -79,6 +79,31 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Bandeja de notificaciones. Id autogenerado (o derivado de la dedupeKey),
+    // mismo criterio por campo que notes/habits.
+    match /notifications/{notificationId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    /* Suscripciones Web Push. Cerradas también para lectura, a diferencia del
+       resto: el documento guarda el endpoint y las claves de cifrado de la
+       suscripción, que es exactamente lo que hace falta para mandarle un push
+       a ese navegador. El cliente no las necesita — la suscripción de *este*
+       dispositivo se la pide al `pushManager`, no a Firestore — y la lista de
+       dispositivos de Ajustes la arma el server (`getPushDevices`), que
+       saltea estas reglas. */
+    match /pushSubscriptions/{subscriptionId} {
+      allow read, write: if false;
+    }
+
+    // Preferencias de notificación. El id del documento es el uid, igual que
+    // expenseCategories/favorites.
+    match /notificationPreferences/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
     /* Firestore ya deniega lo que ninguna regla permita — las reglas se
        combinan con OR, así que este bloque no restringe nada. Queda explícito
        para dejar claro que una colección nueva arranca cerrada hasta que se le

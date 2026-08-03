@@ -89,6 +89,11 @@ export const SCREEN_HEADERS: Record<string, ScreenHeader> = {
   [ROUTES.asistente]: { title: "Asistente", subtitle: "Siempre disponible" },
   [ROUTES.ajustes]: { title: "Ajustes", largeTitle: true },
   [ROUTES.editarPerfil]: { title: "Editar perfil", back: true },
+  [ROUTES.notificaciones]: {
+    title: "Notificaciones",
+    subtitle: "Qué te avisamos y por dónde",
+    back: true,
+  },
   [ROUTES.miniApps]: {
     title: "Mini-apps",
     largeTitle: true,
@@ -99,6 +104,10 @@ export const SCREEN_HEADERS: Record<string, ScreenHeader> = {
   [ROUTES.miniAppSplitGastos]: { title: "Split de gastos", back: true },
   [ROUTES.miniAppGeneradorQr]: { title: "Generador de QR", back: true },
   [ROUTES.miniAppLinks]: { title: "Links guardados", back: true },
+  /* La entrada existe siempre, aunque la pantalla sólo se renderice con
+     `DEV_TOOLS=true`: este mapa es sólo el título del header, y quien no tenga
+     la flag prendida recibe un 404 antes de llegar a verlo. */
+  [ROUTES.debug]: { title: "Debug", subtitle: "Herramientas de desarrollo", back: true },
 };
 
 export function headerFor(pathname: string): ScreenHeader {

@@ -31,6 +31,26 @@ export function parseDay(key: string): Date {
   return new Date(year!, month! - 1, day!, 12);
 }
 
+/**
+ * Instante absoluto (ms desde epoch) de una alerta `yyyy-mm-dd` + `HH:mm`.
+ *
+ * **Se calcula en el cliente, a propósito.** `alertDate`/`alertTime` son la
+ * hora local de quien carga la nota, y el único que conoce ese huso —con su
+ * horario de verano incluido, que cambia según la fecha— es el navegador del
+ * usuario. El server no puede derivarlo: interpretar esos strings con su
+ * propio reloj haría sonar la alerta corrida tantas horas como diferencia haya
+ * (en un deploy en UTC, tres horas antes para Argentina).
+ */
+export function alertInstant(day: string, time: string): number {
+  const [hours, minutes] = time.split(":").map(Number);
+  // `parseDay` da el mediodía local para esquivar el salto de DST a las 00:00;
+  // acá se le pisa la hora, así que ese resguardo ya no aplica y el resultado
+  // es el instante exacto que el usuario eligió.
+  const date = parseDay(day);
+  date.setHours(hours ?? 0, minutes ?? 0, 0, 0);
+  return date.getTime();
+}
+
 /** Mueve una day key `days` días (negativo = hacia atrás). */
 export function shiftDay(key: string, days: number): string {
   const date = parseDay(key);

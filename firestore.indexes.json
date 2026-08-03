@@ -1,0 +1,5 @@
+{
+  "//": "El proyecto no necesita ningún índice compuesto: todas las consultas filtran por igualdad (que Firestore resuelve con los índices automáticos de un solo campo) y ordenan en memoria. La única excepción, `dispatchNoteAlerts`, es un rango sobre `alertAt` con `orderBy` del mismo campo, que también entra en el índice automático. El archivo queda declarado en firebase.json para que, si alguna vez hace falta uno, tenga dónde vivir y se publique con el mismo deploy.",
+  "indexes": [],
+  "fieldOverrides": []
+}

@@ -14,7 +14,7 @@ import {
 import { FlagIcon } from "@/components/atoms/icons";
 import { addNoteAction } from "@/lib/data/notes-actions";
 import type { NotePriority } from "@/lib/data/home";
-import { dayKey, parseDay } from "@/lib/home-model";
+import { alertInstant, dayKey, parseDay } from "@/lib/home-model";
 import {
   NOTE_PRIORITY_LABEL,
   NOTE_PRIORITY_OPTIONS,
@@ -95,13 +95,19 @@ export function NoteComposer({ today, focusSignal }: NoteComposerProps) {
     if (!valid) return;
     startTransition(async () => {
       try {
+        /* El instante absoluto se calcula acá y no en el server: es la hora
+           local de este dispositivo, y el server no conoce su huso (ver
+           `alertInstant`). Sin esto el cron dispararía el recordatorio corrido
+           tantas horas como diferencia haya con el reloj del server. */
+        const alertDay = hasAlert && alertDate ? dayKey(alertDate) : null;
         await addNoteAction({
           text: value,
           date: today,
           priority,
           hasAlert,
-          alertDate: hasAlert && alertDate ? dayKey(alertDate) : null,
+          alertDate: alertDay,
           alertTime: hasAlert ? alertTime : null,
+          alertAtMs: alertDay ? alertInstant(alertDay, alertTime) : null,
         });
         setText("");
         setPriority("medium");

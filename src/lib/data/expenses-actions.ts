@@ -10,6 +10,8 @@ import {
   now,
   type ExpenseCycleDoc,
 } from "@/lib/firebase/collections";
+import { formatMoney } from "@/lib/home-model";
+import { notifyQuietly } from "@/lib/notifications/notify";
 import { DEFAULT_EXPENSE_CATEGORIES } from "./expense-categories";
 import { getClosedExpenseCycles, type ExpensePeriodSummary } from "./expenses";
 
@@ -121,7 +123,7 @@ export async function addExpenseMovementAction(input: AddExpenseMovementInput): 
   }
 
   const categoriesRef = collection(COLLECTIONS.expenseCategories).doc(session.sub);
-  const [, categoriesSnapshot] = await Promise.all([
+  const [cycle, categoriesSnapshot] = await Promise.all([
     getOwnedActiveCycle(input.cycleId, session.sub),
     categoriesRef.get(),
   ]);
@@ -146,7 +148,77 @@ export async function addExpenseMovementAction(input: AddExpenseMovementInput): 
     createdAt: now(),
   });
 
+  await notifyExpenseLimit(session.sub, input.cycleId, cycle);
+
   revalidatePath(ROUTES.inicio);
+}
+
+/**
+ * Umbrales del tope, de mayor a menor. El aviso sale una sola vez por umbral y
+ * por ciclo: la `dedupeKey` de `notify()` lo garantiza, si no cada gasto
+ * cargado después de pasar el 80% volvería a avisar lo mismo.
+ *
+ * Se recorre de mayor a menor y se corta en el primero que se cumple: un gasto
+ * que salta del 70% al 120% de una avisa "te pasaste", no "vas por el 80%".
+ */
+const EXPENSE_LIMIT_THRESHOLDS = [
+  {
+    key: "over",
+    ratio: 1,
+    title: "Te pasaste del tope",
+    body: (spent: number, limit: number) =>
+      `Llevás ${formatMoney(spent)} gastados de un tope de ${formatMoney(limit)}.`,
+  },
+  {
+    key: "80",
+    ratio: 0.8,
+    title: "Vas por el 80% del tope",
+    body: (spent: number, limit: number) =>
+      `Llevás ${formatMoney(spent)} de ${formatMoney(limit)} en este período.`,
+  },
+] as const;
+
+/**
+ * Avisa cuando el gasto acumulado del ciclo cruza un umbral del tope.
+ *
+ * Cuesta una consulta de los movimientos del ciclo (los mismos que la pantalla
+ * va a leer enseguida al revalidar), que es el precio de no llevar el
+ * acumulado como campo del ciclo — un contador que habría que mantener
+ * sincronizado en cada alta y en cada baja, y que se desincroniza en el primer
+ * error a mitad de camino.
+ *
+ * Va con `notifyQuietly`: el gasto ya se guardó, y que falle el aviso no puede
+ * hacer fallar el alta que el usuario pidió.
+ */
+async function notifyExpenseLimit(
+  userId: string,
+  cycleId: string,
+  cycle: ExpenseCycleDoc
+): Promise<void> {
+  if (cycle.expenseLimit <= 0) return;
+
+  const snapshot = await collection(COLLECTIONS.expenseMovements)
+    .where("cycleId", "==", cycleId)
+    .get();
+
+  const spent = snapshot.docs.reduce((total, doc) => {
+    const { amount } = doc.data();
+    return total + (amount < 0 ? -amount : 0);
+  }, 0);
+
+  const crossed = EXPENSE_LIMIT_THRESHOLDS.find(
+    (threshold) => spent >= cycle.expenseLimit * threshold.ratio
+  );
+  if (!crossed) return;
+
+  await notifyQuietly({
+    userId,
+    topic: "expenses.limit-reached",
+    title: crossed.title,
+    description: crossed.body(spent, cycle.expenseLimit),
+    href: ROUTES.inicio,
+    dedupeKey: `${cycleId}:${crossed.key}`,
+  });
 }
 
 /** Categoría fija de los ingresos: no pasan por el ABM de categorías de gasto. */

@@ -17,8 +17,10 @@ export const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID ?? "",
 } as const;
 
-/** Clave para suscribirse a push (Firebase Console → Cloud Messaging). */
-export const vapidKey = process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY ?? "";
+/* El push no pasa por Firebase Cloud Messaging: va derecho al push service del
+   navegador con nuestro propio par de claves VAPID. Ver
+   `src/lib/notifications/web-push.ts` y las variables `*_VAPID_*` del
+   `.env.example`. */
 
 /**
  * `true` si la config alcanza para inicializar el SDK. Permite que la app

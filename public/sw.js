@@ -3,9 +3,10 @@
  * Bumpear CACHE_VERSION invalida todo lo cacheado: es lo que hace que
  * UpdatePrompt / useServiceWorker detecten "hay una versión nueva".
  */
-// v2: cambió la paleta a bordó y con ella los íconos, que se sirven
-// cache-first con el mismo nombre de archivo.
-const CACHE_VERSION = "maguita-v2";
+// v3: el handler de `push` ahora avisa a las pestañas abiertas y mantiene el
+// badge del ícono. Un service worker viejo seguiría mostrando el aviso pero
+// dejaría la campana desactualizada hasta la próxima navegación.
+const CACHE_VERSION = "maguita-v3";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
@@ -96,7 +97,11 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
-/* Notificaciones push (usePushSubscription / NotificationOptIn). */
+/* Notificaciones push (usePushSubscription / NotificationOptIn).
+ *
+ * El payload lo arma `sendWebPush` (src/lib/notifications/web-push.ts):
+ * { title, body, url, tag, badgeCount }.
+ */
 self.addEventListener("push", (event) => {
   if (!event.data) return;
   let payload = {};
@@ -105,13 +110,26 @@ self.addEventListener("push", (event) => {
   } catch {
     payload = { title: "Maguita", body: event.data.text() };
   }
+
+  const url = payload.url ?? "/inicio";
+
   event.waitUntil(
-    self.registration.showNotification(payload.title ?? "Maguita", {
-      body: payload.body ?? "",
-      icon: payload.icon ?? "/icons/icon-192.png",
-      badge: "/icons/icon-192.png",
-      data: { url: payload.url ?? "/inicio" },
-    })
+    Promise.all([
+      self.registration.showNotification(payload.title ?? "Maguita", {
+        body: payload.body ?? "",
+        icon: payload.icon ?? "/icons/icon-192.png",
+        badge: "/icons/icon-192.png",
+        // Con `tag`, un aviso nuevo del mismo evento reemplaza al anterior en
+        // la bandeja del sistema en vez de apilar dos veces lo mismo.
+        tag: payload.tag,
+        data: { url },
+      }),
+      setAppBadge(payload.badgeCount),
+      // El push llegó desde el servidor: las pestañas abiertas tienen la
+      // campana desactualizada y no se enteran solas. Este mensaje es lo que
+      // dispara el router.refresh() de <NotificationSync>.
+      notifyClients({ type: "PUSH_RECEIVED", url }),
+    ])
   );
 });
 
@@ -131,3 +149,23 @@ self.addEventListener("notificationclick", (event) => {
     })()
   );
 });
+
+/** Contador en el ícono de la app instalada. No está en todas partes (iOS, Firefox). */
+async function setAppBadge(count) {
+  if (typeof count !== "number" || !self.navigator?.setAppBadge) return;
+  try {
+    if (count > 0) await self.navigator.setAppBadge(count);
+    else await self.navigator.clearAppBadge();
+  } catch {
+    /* El badge es decorativo: que falle no puede tumbar el resto del handler. */
+  }
+}
+
+/** Avisa a todas las pestañas de la app, estén enfocadas o no. */
+async function notifyClients(message) {
+  const clientList = await self.clients.matchAll({
+    type: "window",
+    includeUncontrolled: true,
+  });
+  for (const client of clientList) client.postMessage(message);
+}

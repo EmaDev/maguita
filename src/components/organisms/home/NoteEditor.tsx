@@ -13,7 +13,7 @@ import {
 } from "lib-kit-components";
 import { updateNoteAction } from "@/lib/data/notes-actions";
 import type { Note, NotePriority } from "@/lib/data/home";
-import { dayKey, parseDay } from "@/lib/home-model";
+import { alertInstant, dayKey, parseDay } from "@/lib/home-model";
 import { NOTE_PRIORITY_OPTIONS, TIME_PICKER_UPWARD } from "./note-priority";
 
 const DEFAULT_ALERT_TIME = "09:00";
@@ -49,14 +49,19 @@ export function NoteEditor({ note, onSaved }: NoteEditorProps) {
     if (!valid) return;
     startTransition(async () => {
       try {
+        // El instante absoluto se recalcula en cada guardado, igual que en el
+        // composer: si el usuario corre la alerta, el cron tiene que ver la
+        // hora nueva (ver `alertInstant`).
+        const alertDay = hasAlert && alertDate ? dayKey(alertDate) : null;
         await updateNoteAction({
           id: note.id,
           text: value,
           date: note.date,
           priority,
           hasAlert,
-          alertDate: hasAlert && alertDate ? dayKey(alertDate) : null,
+          alertDate: alertDay,
           alertTime: hasAlert ? alertTime : null,
+          alertAtMs: alertDay ? alertInstant(alertDay, alertTime) : null,
         });
         snack({ message: "Nota actualizada.", variant: "success" });
         onSaved();

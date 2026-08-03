@@ -8,6 +8,9 @@ import {
   type PartialWithFieldValue,
   type QueryDocumentSnapshot,
 } from "firebase-admin/firestore";
+import type { NotificationTone } from "lib-kit-components";
+import type { QuietHours } from "@/lib/notifications/quiet-hours";
+import type { NotificationTopicId } from "@/lib/notifications/topics";
 import { adminDb } from "./admin";
 
 /**
@@ -44,6 +47,15 @@ export const COLLECTIONS = {
   links: "links",
   /** Hábitos de la tab Hábitos. Id autogenerado: muchos por usuario. */
   habits: "habits",
+  /**
+   * Bandeja de notificaciones que alimenta la campana del shell. Id
+   * autogenerado, salvo cuando la emisión trae `dedupeKey` (ver `notify()`).
+   */
+  notifications: "notifications",
+  /** Suscripciones Web Push, una por navegador/dispositivo. Id = `sha256(endpoint)`. */
+  pushSubscriptions: "pushSubscriptions",
+  /** Preferencias de notificación por usuario. Id del documento = `uid`. */
+  notificationPreferences: "notificationPreferences",
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];
@@ -149,6 +161,15 @@ export interface NoteDoc {
   alertDate: string | null;
   /** `HH:mm`. `null` si `hasAlert` es `false`. */
   alertTime: string | null;
+  /**
+   * El instante exacto en que vence la alerta, derivado de
+   * `alertDate`+`alertTime` **en el huso del dispositivo que la cargó** (ver
+   * `alertInstant`). Es el campo por el que consulta el cron que dispara los
+   * recordatorios (`dispatchNoteAlerts`): los dos strings de arriba siguen
+   * siendo lo que la UI muestra, pero no se pueden comparar contra un reloj
+   * sin saber de qué huso son.
+   */
+  alertAt: Timestamp | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -187,6 +208,74 @@ export interface HabitDoc {
   updatedAt: Timestamp;
 }
 
+/**
+ * Una entrada de la bandeja de notificaciones. La escribe siempre `notify()`
+ * (`src/lib/notifications/notify.ts`), nunca un módulo a mano: es lo que
+ * garantiza que el mismo evento salga por el panel y por push con el mismo
+ * texto.
+ */
+export interface NotificationDoc {
+  ownerId: string;
+  /** Id del registro de topics (`src/lib/notifications/topics.ts`). */
+  topic: NotificationTopicId;
+  title: string;
+  description: string | null;
+  /** Copiado del topic al emitir: si mañana cambia el tono del topic, lo ya emitido no se repinta. */
+  tone: NotificationTone;
+  /** Ruta interna a la que lleva tocar la notificación. `null` = no navega. */
+  href: string | null;
+  read: boolean;
+  readAt: Timestamp | null;
+  createdAt: Timestamp;
+  /**
+   * Momento a partir del cual la notificación se puede borrar. Lo usa la TTL
+   * policy de Firestore (campo `expiresAt`), no la app: `getNotifications` no
+   * filtra por fecha.
+   */
+  expiresAt: Timestamp | null;
+}
+
+/**
+ * Una suscripción Web Push: un navegador en un dispositivo. El id del
+ * documento es `sha256(endpoint)` para que volver a suscribir el mismo
+ * navegador pise la fila en vez de duplicarla.
+ */
+export interface PushSubscriptionDoc {
+  ownerId: string;
+  endpoint: string;
+  /** Claves de cifrado de `PushSubscription.toJSON().keys` — sin ellas no se puede cifrar el payload. */
+  p256dh: string;
+  auth: string;
+  /** Para poder distinguir los dispositivos en Ajustes. `null` si el navegador no lo expone. */
+  userAgent: string | null;
+  /** Zona horaria IANA del dispositivo, para evaluar el horario de silencio. */
+  timeZone: string | null;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  lastSuccessAt: Timestamp | null;
+  /** Envíos fallidos seguidos. Un 404/410 del push service la borra directo. */
+  failureCount: number;
+}
+
+/**
+ * Override del push de un topic. Ausente = el `pushByDefault` del registro.
+ * La entrada del panel no es configurable (ver el comentario de `topics.ts`).
+ */
+export interface NotificationTopicPreference {
+  push: boolean;
+}
+
+export interface NotificationPreferencesDoc {
+  /** Interruptor maestro de push: apagado, no sale ningún push aunque el topic lo permita. */
+  pushEnabled: boolean;
+  /** Overrides por topic. Las claves son `NotificationTopicId`, pero un topic borrado del registro puede sobrevivir acá. */
+  topics: Record<string, NotificationTopicPreference>;
+  quietHours: QuietHours;
+  /** Zona horaria IANA con la que se evalúa `quietHours`. `null` = no se aplica. */
+  timeZone: string | null;
+  updatedAt: Timestamp;
+}
+
 /** Mapea cada colección con la forma de sus documentos. */
 export interface CollectionTypes {
   [COLLECTIONS.users]: UserDoc;
@@ -198,6 +287,9 @@ export interface CollectionTypes {
   [COLLECTIONS.notes]: NoteDoc;
   [COLLECTIONS.links]: LinkDoc;
   [COLLECTIONS.habits]: HabitDoc;
+  [COLLECTIONS.notifications]: NotificationDoc;
+  [COLLECTIONS.pushSubscriptions]: PushSubscriptionDoc;
+  [COLLECTIONS.notificationPreferences]: NotificationPreferencesDoc;
 }
 
 /* ------------------------------------------------------------------ *
