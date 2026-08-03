@@ -1,19 +1,20 @@
 "use client";
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { Button, FloatingButton, usePersistentState, type FabAction } from "lib-kit-components";
-import { NoteIcon, ReceiptIcon, ShareIcon } from "@/components/atoms/icons";
+import { Button, FloatingButton, type FabAction } from "lib-kit-components";
+import { FlameIcon, NoteIcon, ReceiptIcon, ShareIcon } from "@/components/atoms/icons";
 import { useAppSheet } from "@/components/shell/app-sheet";
 import { useShellTabs } from "@/components/shell/shell-tabs";
 import { ShareAppSheet } from "@/components/organisms/quick-actions";
 import { APP_NAME } from "@/lib/app-config";
+import { HabitComposer } from "./home/HabitComposer";
 import { HabitsPanel } from "./home/HabitsPanel";
 import { MovementsPanel } from "./home/MovementsPanel";
 import { NewExpenseMovementSheet } from "./home/NewExpenseMovementSheet";
 import { NotesPanel } from "./home/NotesPanel";
 import { SummaryPanel } from "./home/SummaryPanel";
 import { isHomeTab, type HomeTab } from "./home/tabs";
-import type { Habit, HomeData } from "@/lib/data/home";
+import type { HomeData } from "@/lib/data/home";
 import { byDayDesc } from "@/lib/home-model";
 
 /**
@@ -30,9 +31,6 @@ import { byDayDesc } from "@/lib/home-model";
  * o Ajustes. Al montarse una sola vez para las cuatro tabs (fuera del
  * `switch` de abajo) se mantiene visible al cambiar de tab sin desmontarse.
  */
-
-/** Días marcados en este dispositivo, por hábito. Constante de módulo: pasarle un `{}` nuevo en cada render al hook lo re-inicializaría. */
-const NO_HABIT_LOG: Record<string, string[]> = {};
 
 /**
  * Contenido del sheet "Nuevo gasto" del FAB cuando todavía no hay ciclo
@@ -59,11 +57,6 @@ export function HomeBoard({ data }: { data: HomeData }) {
   const active: HomeTab = isHomeTab(tab) ? tab : "resumen";
   const { openSheet, closeSheet } = useAppSheet();
 
-  const [habitLog, setHabitLog] = usePersistentState<Record<string, string[]>>(
-    "maguita:habitos",
-    NO_HABIT_LOG
-  );
-
   /**
    * Un contador, no un booleano: "Nueva nota" tiene que poder enfocar el
    * composer también cuando ya estamos parados en la tab Notas, y un booleano
@@ -80,43 +73,33 @@ export function HomeBoard({ data }: { data: HomeData }) {
   // tab): acá sólo se ordenan para el resumen, sin mezclar ningún borrador.
   const notes = useMemo(() => byDayDesc(data.notes), [data.notes]);
 
-  const habits = useMemo<Habit[]>(
-    () =>
-      data.habits.map((habit) => ({
-        ...habit,
-        doneDates: Array.from(
-          new Set([...habit.doneDates, ...(habitLog[habit.id] ?? [])])
-        ),
-      })),
-    [data.habits, habitLog]
-  );
-
-  const toggleHabit = useCallback(
-    (habitId: string, done: boolean) => {
-      setHabitLog((prev) => {
-        const marked = prev[habitId] ?? [];
-        return {
-          ...prev,
-          [habitId]: done
-            ? marked.includes(today)
-              ? marked
-              : [...marked, today]
-            : marked.filter((day) => day !== today),
-        };
-      });
-    },
-    [setHabitLog, today]
-  );
+  /**
+   * Crear un hábito abre el mismo composer que usa la tab (no un formulario
+   * aparte) y, al guardar, lleva a Hábitos: si el sheet se cerrara dejando al
+   * usuario en Resumen, el hábito recién creado no se vería por ningún lado.
+   */
+  const openNewHabit = useCallback(() => {
+    openSheet(
+      <HabitComposer
+        onSaved={() => {
+          closeSheet();
+          setTab("habitos");
+        }}
+      />,
+      { title: "Nuevo hábito" }
+    );
+  }, [openSheet, closeSheet, setTab]);
 
   /**
-   * "Nuevo gasto" y "Compartir" abren el mismo sheet global que usa
-   * Movimientos (`useAppSheet()`), no el `<FabActionSheets>` de la librería:
-   * ese monta sus propios `BottomSheet` y no expone ninguna forma de
-   * cerrarlos desde adentro de su `content` — con `openSheet` acá, "Nuevo
+   * "Nuevo gasto", "Nuevo hábito" y "Compartir" abren el mismo sheet global
+   * que usa Movimientos (`useAppSheet()`), no el `<FabActionSheets>` de la
+   * librería: ese monta sus propios `BottomSheet` y no expone ninguna forma
+   * de cerrarlos desde adentro de su `content` — con `openSheet` acá, "Nuevo
    * gasto" puede pasarle `onSaved={closeSheet}` a `NewExpenseMovementSheet`
    * (ver ese componente) y cerrarse solo al guardar, igual que ya hacía desde
-   * Movimientos. "Nueva nota" es la excepción: no abre ningún sheet, lleva al
-   * composer que ya vive arriba de la tab Notas y lo enfoca.
+   * Movimientos, y "Nuevo hábito" hace lo mismo con `HabitComposer`. "Nueva
+   * nota" es la excepción: no abre ningún sheet, lleva al composer que ya
+   * vive arriba de la tab Notas y lo enfoca.
    *
    * Depende de `data.expenseCycle`/`data.expenseCategories`: a diferencia de
    * compartir, "Nuevo gasto" no es estático — sin ciclo activo no hay contra
@@ -155,9 +138,14 @@ export function HomeBoard({ data }: { data: HomeData }) {
               ),
       },
       {
+        icon: <FlameIcon />,
+        label: "Nuevo hábito",
+        tone: "success",
+        onClick: openNewHabit,
+      },
+      {
         icon: <ShareIcon />,
         label: "Compartir",
-        tone: "success",
         onClick: () => openSheet(<ShareAppSheet />, { title: `Compartir ${APP_NAME}` }),
       },
     ],
@@ -169,6 +157,7 @@ export function HomeBoard({ data }: { data: HomeData }) {
       openSheet,
       closeSheet,
       focusNewNote,
+      openNewHabit,
     ]
   );
 
@@ -188,7 +177,7 @@ export function HomeBoard({ data }: { data: HomeData }) {
       panel = <NotesPanel today={today} notes={notes} focusSignal={noteFocusSignal} />;
       break;
     case "habitos":
-      panel = <HabitsPanel today={today} habits={habits} onToggle={toggleHabit} />;
+      panel = <HabitsPanel today={today} habits={data.habits} />;
       break;
     default:
       panel = (
@@ -197,7 +186,7 @@ export function HomeBoard({ data }: { data: HomeData }) {
           movements={data.movements}
           expenseCycle={data.expenseCycle}
           notes={notes}
-          habits={habits}
+          habits={data.habits}
           onGoTo={setTab}
         />
       );

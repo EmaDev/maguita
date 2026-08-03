@@ -22,6 +22,7 @@ una descripción). Ver también la nota en `AGENTS.md`.
 | `expenseCategories` | `uid` de Firebase Auth | `src/lib/firebase/collections.ts` → `ExpenseCategoriesDoc` |
 | `notes` | autogenerado | `src/lib/firebase/collections.ts` → `NoteDoc` |
 | `links` | autogenerado | `src/lib/firebase/collections.ts` → `LinkDoc` |
+| `habits` | autogenerado | `src/lib/firebase/collections.ts` → `HabitDoc` |
 
 ```mermaid
 erDiagram
@@ -92,6 +93,15 @@ erDiagram
         timestamp createdAt
         timestamp updatedAt
     }
+    HABITS {
+        string ownerId
+        string name "ej. Leer 20 minutos"
+        string emoji "de una paleta fija, no input libre"
+        number goalPerWeek "1 a 7, informativa: no afecta la racha"
+        string_array doneDates "yyyy-mm-dd, sin duplicados ni orden garantizado"
+        timestamp createdAt
+        timestamp updatedAt
+    }
     USERS ||--o| FAVORITES : "mismo uid, colecciones separadas a propósito"
     USERS ||--o{ PASSWORD_RESET_CODES : "por email, de un solo uso"
     USERS ||--o{ EXPENSE_CYCLES : "ownerId, sólo uno active a la vez"
@@ -100,6 +110,7 @@ erDiagram
     EXPENSE_CATEGORIES ||--o{ EXPENSE_MOVEMENTS : "category/categoryEmoji copiados al alta, sin FK"
     USERS ||--o{ NOTES : "ownerId"
     USERS ||--o{ LINKS : "ownerId"
+    USERS ||--o{ HABITS : "ownerId"
 ```
 
 `users` y `favorites` **se mantienen separadas** aunque ambas cuelgan del
@@ -410,6 +421,65 @@ Decisiones de diseño:
   mano un preview que salió mal (ej. un sitio sin metatags), sólo borrar y
   volver a guardar.
 
+### `habits/{habitId}`
+
+Hábitos de la tab **Hábitos** de Inicio: el check del día, la racha de cada
+uno y la grilla de constancia. Id autogenerado, mismo criterio de dueño por
+campo que `notes`/`links` — muchos hábitos por usuario, con un tope de 50
+(ver abajo).
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `ownerId` | `string` | uid del dueño |
+| `name` | `string` | nombre libre, ej. "Leer 20 minutos". Máx. 60 caracteres |
+| `emoji` | `string` | de la paleta fija de `habit-options.ts`, no un input libre |
+| `goalPerWeek` | `number` | meta de días por semana, 1 a 7. **Informativa**: no entra en el cálculo de la racha, sólo en la barra de progreso semanal |
+| `doneDates` | `string[]` | días cumplidos, `yyyy-mm-dd`. Sólo se escribe con `arrayUnion`/`arrayRemove`: sin duplicados, pero **sin orden garantizado** |
+| `createdAt` / `updatedAt` | `Timestamp` | — |
+
+Accesores: `getHabits` (`src/lib/data/habits.ts`, sólo Server Components),
+`addHabitAction` / `toggleHabitDayAction` / `updateHabitAction` /
+`deleteHabitAction` (`src/lib/data/habits-actions.ts`, Server Actions — todas
+re-verifican la sesión y el dueño del documento).
+
+Decisiones de diseño:
+
+- **El historial va en un array adentro del hábito, no en una colección
+  aparte.** `doneDates` es un `string[]` en el mismo documento, igual que
+  `favorites.miniAppIds` y `expenseCategories.categories`. La alternativa
+  (una colección `habitLogs` con un documento por día cumplido) obligaría a
+  una query por hábito —o a un índice compuesto— cada vez que se abre Inicio,
+  para pintar una grilla de constancia que necesita *todos* los días juntos
+  de una. Con el array, leer un hábito ya trae su historial completo. El
+  costo es el límite de 1MB por documento, que en la práctica no se toca: a
+  ~11 bytes por fecha son décadas de días cumplidos.
+- **`arrayUnion`/`arrayRemove` en vez de leer, modificar y reescribir el
+  array.** `toggleHabitDayAction` no hace read-modify-write: son operaciones
+  atómicas del lado de Firestore, así que dos toques rápidos (o la misma
+  cuenta en dos dispositivos) no se pisan. Además `arrayUnion` es
+  idempotente, que es justo lo que necesita la UI optimista de `HabitsPanel`
+  — marcar dos veces el mismo día no lo duplica.
+- **El día lo manda el cliente y el server sólo valida su forma.** El día
+  cumplido es el día *local del usuario*, y el server no conoce su huso, así
+  que no puede verificarlo contra su propio reloj. `assertValidDay` chequea
+  que sea una fecha real (`yyyy-mm-dd` que exista en el calendario) para no
+  ensuciar `doneDates` con strings que después rompan la grilla; qué día es
+  "hoy" queda del lado del cliente. Como el dato es sólo del propio usuario,
+  el peor caso es que alguien se infle su propia racha.
+- **Orden de lectura ascendente por `createdAt`**, al revés que `notes` y
+  `links`: la lista es una checklist que se marca todos los días, y que un
+  hábito nuevo se meta arriba movería de lugar los que el usuario ya tiene
+  memorizados.
+- **Tope de 50 hábitos por cuenta.** La tab los muestra todos juntos sin
+  paginar y el `doneDates` de cada uno viaja entero en cada carga de Inicio
+  — que es una pantalla compartida con movimientos y notas, no sólo de
+  hábitos.
+- **La racha no se guarda, se deriva.** `streakOf`/`longestStreakOf`/
+  `weekCountOf` (`src/lib/home-model.ts`) la calculan a partir de
+  `doneDates` en cada render. Guardarla como campo obligaría a mantenerla
+  sincronizada en cada toggle y a recalcularla igual cuando pasa la
+  medianoche sin que nadie escriba nada.
+
 ### `passwordResetCodes/{hash}`
 
 | Campo | Tipo | Notas |
@@ -512,6 +582,63 @@ documento entero, campos nuevos incluidos — Firestore no tiene reglas a
 nivel de campo para lectura.
 
 ## Changelog
+
+### 2026-08-03 — Nueva colección `habits`: la tab Hábitos deja de ser local
+
+**Qué cambió.** Se agregó la colección `habits` (`HabitDoc`) y con ella el
+backend real del módulo de hábitos: alta, edición, borrado y marcado del día
+(`src/lib/data/habits.ts` + `habits-actions.ts`). `getHomeData` ya no
+devuelve `habits: []` — ahora los trae de Firestore junto con notas y
+movimientos. El tipo `Habit` sumó `emoji`.
+
+**Por qué.** La tab Hábitos existía pero no tenía dónde guardar: `getHomeData`
+devolvía la colección vacía y `HomeBoard` guardaba los días marcados en
+`localStorage` (`maguita:habitos`) con `usePersistentState`. Como la lista de
+hábitos siempre venía vacía, no había forma de crear uno y ese log local no
+llegaba a mostrarse nunca: la tab quedaba permanentemente en su estado vacío.
+Además, atado al `localStorage` la racha se perdía al cambiar de dispositivo o
+al limpiar el navegador, que es justo lo que un sistema de rachas no puede
+darse el lujo de perder. Ese estado local se eliminó por completo.
+
+```mermaid
+erDiagram
+    USERS ||--o{ HABITS : "ownerId"
+    HABITS {
+        string ownerId
+        string name
+        string emoji
+        number goalPerWeek "1 a 7, informativa"
+        string_array doneDates "yyyy-mm-dd, arrayUnion/arrayRemove"
+        timestamp createdAt
+        timestamp updatedAt
+    }
+```
+
+**Decisión de diseño principal**: el historial de días cumplidos va como
+`string[]` adentro del propio hábito y no en una colección `habitLogs`
+aparte. La grilla de constancia necesita todos los días juntos de una, así
+que una colección aparte costaría una query por hábito (o un índice
+compuesto) en cada carga de Inicio; con el array, leer el hábito ya trae su
+historial. Ver la sección [`habits/{habitId}`](#habitshabitid) para el resto
+de las decisiones (idempotencia del toggle, validación del día, tope de 50).
+
+**Reglas.** `habits` necesita su propio `match`: sin él caía en el
+`match /{document=**}` final y quedaba cerrada. Mismo criterio por campo que
+`notes`/`links` — el cliente lee lo suyo y no escribe nada, todas las
+escrituras pasan por Server Actions. Bloque agregado a `firestore.rules`:
+
+```
+    // Hábitos de la tab Hábitos. Id autogenerado, mismo criterio por campo
+    // que notes/links: el historial de días cumplidos (`doneDates`) vive
+    // adentro del mismo documento, así que no necesita un match aparte.
+    match /habits/{habitId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+```
+
+**Índices.** Ninguno nuevo: `getHabits` filtra sólo por `ownerId` (equality) y
+ordena en memoria, mismo criterio que `getNotes`/`getLinks`.
 
 ### 2026-08-02 — Nueva mini-app privada "Links guardados"
 

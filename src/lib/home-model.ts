@@ -100,6 +100,43 @@ export function streakOf(doneDates: string[], today: string): number {
   return streak;
 }
 
+/**
+ * La racha más larga que el hábito tuvo alguna vez, esté activa o no. Es el
+ * récord contra el que se compara la racha actual ("vas 4, tu récord es 12").
+ *
+ * Ordena las fechas como strings: el formato `yyyy-mm-dd` es lexicográfico,
+ * así que ordenarlo alfabéticamente ya es ordenarlo cronológicamente, sin
+ * construir un `Date` por día.
+ */
+export function longestStreakOf(doneDates: string[]): number {
+  const days = Array.from(new Set(doneDates)).sort();
+  let best = 0;
+  let run = 0;
+  let previous: string | null = null;
+
+  for (const day of days) {
+    run = previous !== null && shiftDay(previous, 1) === day ? run + 1 : 1;
+    if (run > best) best = run;
+    previous = day;
+  }
+
+  return best;
+}
+
+/**
+ * Días cumplidos en los últimos 7 días corridos, hoy incluido — se compara
+ * contra `goalPerWeek`. Son 7 días hacia atrás, no la semana calendario: así
+ * la meta no se "resetea" el lunes ni queda a mitad de camino un miércoles.
+ */
+export function weekCountOf(doneDates: string[], today: string): number {
+  const done = new Set(doneDates);
+  let count = 0;
+  for (let offset = 0; offset < 7; offset += 1) {
+    if (done.has(shiftDay(today, -offset))) count += 1;
+  }
+  return count;
+}
+
 export interface HabitsToday {
   done: number;
   total: number;

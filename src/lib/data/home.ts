@@ -2,14 +2,14 @@ import "server-only";
 import { dayKey } from "@/lib/home-model";
 import { getActiveExpenseCycle, getExpenseMovements, type ExpenseCycle } from "./expenses";
 import { getExpenseCategories, type ExpenseCategoryItem } from "./expense-categories";
+import { getHabits } from "./habits";
 import { getNotes } from "./notes";
 
 /**
  * Datos de la pantalla de Inicio: movimientos, notas y hábitos.
  *
- * Igual que el resto de `lib/data`, es la fuente única de la pantalla. Hábitos
- * todavía devuelve la colección vacía (sin backend); movimientos y notas ya
- * salen de Firestore.
+ * Igual que el resto de `lib/data`, es la fuente única de la pantalla: las
+ * tres secciones salen de Firestore.
  */
 
 export interface Movement {
@@ -45,9 +45,11 @@ export interface Note {
 export interface Habit {
   id: string;
   name: string;
-  /** Días cumplidos, en formato `yyyy-mm-dd`. */
+  /** Emoji que identifica al hábito en la lista. */
+  emoji: string;
+  /** Días cumplidos, en formato `yyyy-mm-dd`. Sin duplicados ni orden garantizado. */
   doneDates: string[];
-  /** Meta de días por semana. Informativa: no afecta ningún cálculo. */
+  /** Meta de días por semana (1 a 7). Informativa: no afecta el cálculo de la racha. */
   goalPerWeek: number;
 }
 
@@ -69,15 +71,16 @@ export interface HomeData {
 }
 
 /**
- * Hábitos todavía no tienen backend (`_userId` no filtra nada ahí). El
- * gestor de gastos y las notas sí: los movimientos son los del ciclo activo
- * del usuario (si tiene uno), y las notas son todas las suyas.
+ * Todo lo de la pantalla, filtrado por el usuario de la sesión: los
+ * movimientos son los del ciclo activo (si tiene uno), y las notas y los
+ * hábitos son todos los suyos.
  */
 export async function getHomeData(userId: string): Promise<HomeData> {
-  const [expenseCycle, expenseCategories, notes] = await Promise.all([
+  const [expenseCycle, expenseCategories, notes, habits] = await Promise.all([
     getActiveExpenseCycle(userId),
     getExpenseCategories(userId),
     getNotes(userId),
+    getHabits(userId),
   ]);
   const movements = expenseCycle ? await getExpenseMovements(expenseCycle.id) : [];
 
@@ -85,7 +88,7 @@ export async function getHomeData(userId: string): Promise<HomeData> {
     today: dayKey(new Date()),
     movements,
     notes,
-    habits: [],
+    habits,
     expenseCycle,
     expenseCategories,
   };

@@ -42,6 +42,8 @@ export const COLLECTIONS = {
   notes: "notes",
   /** Links guardados de la mini-app de links. Id autogenerado: muchos por usuario. */
   links: "links",
+  /** Hábitos de la tab Hábitos. Id autogenerado: muchos por usuario. */
+  habits: "habits",
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];
@@ -167,6 +169,24 @@ export interface LinkDoc {
   updatedAt: Timestamp;
 }
 
+export interface HabitDoc {
+  ownerId: string;
+  /** Nombre libre, ej. "Leer 20 minutos". */
+  name: string;
+  /** Emoji que identifica el hábito en la lista (elegido de una paleta fija en el composer). */
+  emoji: string;
+  /** Meta de días por semana (1 a 7). Informativa: no afecta el cálculo de la racha. */
+  goalPerWeek: number;
+  /**
+   * Días cumplidos, `yyyy-mm-dd`. Se escribe sólo con `arrayUnion`/
+   * `arrayRemove` (ver `toggleHabitDayAction`), así que no tiene duplicados,
+   * pero tampoco orden garantizado: quien lo lea debe ordenarlo si lo necesita.
+   */
+  doneDates: string[];
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 /** Mapea cada colección con la forma de sus documentos. */
 export interface CollectionTypes {
   [COLLECTIONS.users]: UserDoc;
@@ -177,6 +197,7 @@ export interface CollectionTypes {
   [COLLECTIONS.expenseCategories]: ExpenseCategoriesDoc;
   [COLLECTIONS.notes]: NoteDoc;
   [COLLECTIONS.links]: LinkDoc;
+  [COLLECTIONS.habits]: HabitDoc;
 }
 
 /* ------------------------------------------------------------------ *

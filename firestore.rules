@@ -71,6 +71,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Hábitos de la tab Hábitos. Id autogenerado, mismo criterio por campo
+    // que notes/links: el historial de días cumplidos (`doneDates`) vive
+    // adentro del mismo documento, así que no necesita un match aparte.
+    match /habits/{habitId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
     /* Firestore ya deniega lo que ninguna regla permita — las reglas se
        combinan con OR, así que este bloque no restringe nada. Queda explícito
        para dejar claro que una colección nueva arranca cerrada hasta que se le
