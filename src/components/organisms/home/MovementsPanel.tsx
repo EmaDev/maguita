@@ -24,6 +24,8 @@ interface MovementsPanelProps {
   expenseCycle: ExpenseCycle | null;
   cycleMovements: Movement[];
   expenseCategories: ExpenseCategoryItem[];
+  pinSet: boolean;
+  locked: boolean;
 }
 
 export function MovementsPanel({
@@ -31,12 +33,19 @@ export function MovementsPanel({
   expenseCycle,
   cycleMovements,
   expenseCategories,
+  pinSet,
+  locked,
 }: MovementsPanelProps) {
   const { openSheet, closeSheet } = useAppSheet();
 
   const openSettingsSheet = () =>
     openSheet(
-      <ExpenseSettingsSheet categories={expenseCategories} cycle={expenseCycle ?? undefined} />,
+      <ExpenseSettingsSheet
+        categories={expenseCategories}
+        cycle={expenseCycle ?? undefined}
+        pinSet={pinSet}
+        locked={locked}
+      />,
       {
         title: "Ajustes",
         description: "Categorías de gasto, y tope y lapso del período en curso.",

@@ -34,7 +34,7 @@ erDiagram
         string name
         string alias "nullable, apodo libre sin unicidad"
         string avatarUrl "nullable, URL de descarga de Firebase Storage"
-        object preferences "theme, haptics, reduceData"
+        object preferences "theme, haptics, reduceData, pinHash, lockedModules"
         timestamp createdAt
         timestamp updatedAt
     }
@@ -93,6 +93,8 @@ erDiagram
         string image "nullable, URL absoluta de og:image/twitter:image"
         string siteName "nullable, og:site_name"
         string domain "host sin www., ej. github.com"
+        string note "nullable, descripción propia del usuario"
+        string category "nullable, categoría libre del usuario"
         timestamp createdAt
         timestamp updatedAt
     }
@@ -187,12 +189,16 @@ Auth**; este documento es todo lo que Auth no sabe.
 | `theme` | `"light" \| "dark" \| "system"` | `"system"` | `localStorage["maguita:theme"]` |
 | `haptics` | `boolean` | `true` | `localStorage["maguita:haptics"]` |
 | `reduceData` | `boolean` | `false` | `localStorage["maguita:reduce-data"]` |
+| `pinHash` | `string \| null` | `null` | — (sólo Firestore, ver el [Changelog](#changelog)) |
+| `lockedModules` | `string[]` | `[]` | — (sólo Firestore, ídem) |
 
-> Los defaults del server están alineados a propósito con los de
-> `localStorage` para que, cuando se conecte la UI, un usuario nuevo vea lo
-> mismo en ambos lados. **La UI todavía no lee/escribe estos campos** — hoy
-> sigue funcionando 100% con `localStorage` (`ThemeProvider`,
-> `SettingsPanel`). Los accesores están listos para cuando se conecte.
+> Los defaults de `theme`/`haptics`/`reduceData` están alineados a propósito
+> con los de `localStorage` para que, cuando se conecte la UI, un usuario
+> nuevo vea lo mismo en ambos lados. **La UI todavía no lee/escribe esos tres
+> campos** — hoy siguen funcionando 100% con `localStorage`
+> (`ThemeProvider`, `SettingsPanel`). Los accesores están listos para cuando
+> se conecten. `pinHash`/`lockedModules` son la excepción: esos sí están
+> conectados de punta a punta desde que se agregaron (ver el changelog).
 
 Accesores: `getProfile` (`src/lib/data/profile.ts`, sólo Server Components),
 `updateProfileAction` / `updatePreferencesAction`
@@ -201,7 +207,9 @@ Accesores: `getProfile` (`src/lib/data/profile.ts`, sólo Server Components),
 `prevState, FormData`, ver `EditProfileForm`) y, si el form manda una foto,
 la sube con `uploadAvatar` (`src/lib/firebase/storage.ts`) antes de escribir
 `avatarUrl`. Alta: `createAccount` / `findOrCreateGoogleAccount`
-(`src/lib/auth/users.ts`).
+(`src/lib/auth/users.ts`). `pinHash`/`lockedModules` tienen sus propias
+Server Actions (`setPinAction`, `setModuleLockAction`) y una de verificación
+(`verifyPinAction`) — ver el changelog para el detalle.
 
 ### `favorites/{uid}`
 
@@ -435,11 +443,14 @@ dueño por campo que `notes`/`expenseCycles` — muchos links por usuario.
 | `image` | `string \| null` | URL absoluta de `og:image`/`twitter:image` (resuelta contra la URL final tras redirects) |
 | `siteName` | `string \| null` | `og:site_name` |
 | `domain` | `string` | host de `url` sin `www.` — evita parsear la URL en el cliente sólo para mostrarlo |
+| `note` | `string \| null` | Descripción propia del usuario, distinta de `description` (la de los metatags). `null` = no puso ninguna |
+| `category` | `string \| null` | Categoría libre del usuario (ej. "Trabajo", "Recetas"). `null` = sin categorizar |
 | `createdAt` / `updatedAt` | `Timestamp` | — |
 
 Accesores: `getLinks` (`src/lib/data/links.ts`, sólo Server Components),
-`addLinkAction` / `deleteLinkAction` (`src/lib/data/links-actions.ts`, Server
-Actions — re-verifican la sesión y, en el borrado, el dueño del documento).
+`addLinkAction` / `updateLinkAction` / `deleteLinkAction`
+(`src/lib/data/links-actions.ts`, Server Actions — re-verifican la sesión y,
+en la edición/el borrado, el dueño del documento).
 
 Decisiones de diseño:
 
@@ -860,6 +871,103 @@ documento entero, campos nuevos incluidos — Firestore no tiene reglas a
 nivel de campo para lectura.
 
 ## Changelog
+
+### 2026-08-04 — Links guardados: descripción y categoría propias del usuario
+
+**Qué cambió.** `LinkDoc` sumó dos campos: `note` (`string | null`,
+descripción libre que escribe el usuario) y `category` (`string | null`,
+categoría libre, ej. "Trabajo"/"Recetas"). Nueva Server Action
+`updateLinkAction(linkId, { note, category })` en
+`src/lib/data/links-actions.ts` para editarlos después del alta —
+re-verifica dueño, mismo criterio que `deleteLinkAction`. `addLinkAction`
+ahora recibe un segundo parámetro opcional `{ note?, category? }` para
+completarlos ya en el alta. Ambos se normalizan a `null` si vienen vacíos
+o sólo espacios (`orNull`), nunca `""`.
+
+**Por qué.** `description` ya existía, pero es la del sitio (`og:description`,
+resuelta automáticamente por `fetchLinkMetadata`) — no había forma de que el
+usuario agregue su propia nota ("para qué guardé esto") ni de agruparlos por
+tema. `note`/`category` son del usuario, editables en cualquier momento
+desde el modal de detalle (`LinkDetailModal`), y quedan aparte de
+`description` en vez de pisarla para no perder el dato original del sitio.
+El buscador de la mini-app (conectado al buscador del `AppHeader`, ver
+`useShellSearch`) ahora también matchea contra estos dos campos, no sólo
+contra la URL.
+
+```mermaid
+erDiagram
+    LINKS {
+        string note "+nuevo, nullable"
+        string category "+nuevo, nullable"
+    }
+```
+
+**Reglas.** Sin cambios — `links/{linkId}` ya era de sólo lectura por
+`ownerId` para el cliente (`allow read: if ... resource.data.ownerId ==
+request.auth.uid; allow write: if false`), y los campos nuevos no cambian
+eso: siguen escribiéndose sólo por Server Actions con Admin SDK. Bloque de
+`firestore.rules` reproducido tal cual, sin tocar:
+
+```
+match /links/{linkId} {
+  allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+  allow write: if false;
+}
+```
+
+### 2026-08-04 — PinLock opcional por módulo/mini-app
+
+**Qué cambió.** `UserPreferences` (adentro de `users/{uid}`) sumó dos
+campos: `pinHash` (`string | null`, sha256 hex de un PIN de 4 dígitos) y
+`lockedModules` (`string[]`, ids de los módulos/mini-apps con el candado
+activo). Tres Server Actions nuevas en `src/lib/data/profile-actions.ts`:
+
+- `setPinAction(pin: string | null)`: define/cambia/quita el PIN
+  compartido. `null` también vacía `lockedModules` — no puede quedar un
+  módulo "bloqueado" sin PIN contra el cual verificar.
+- `setModuleLockAction(moduleId: string, locked: boolean)`: prende/apaga el
+  candado de un módulo puntual (falla si todavía no hay PIN). Usa
+  `FieldValue.arrayUnion`/`arrayRemove` sobre `preferences.lockedModules`
+  por dot-path, mismo criterio atómico que `toggleHabitDayAction` con
+  `doneDates`.
+- `verifyPinAction(code: string): Promise<boolean>`: compara contra el hash
+  guardado. Se llama desde el cliente (`onUnlock` de `PinLock`, de
+  `lib-kit-components`) — el hash nunca sale del server.
+
+**Por qué.** Se pidió poder poner un PIN opcional a los tabs de Inicio
+(Movimientos, Notas, Hábitos) y a cualquier mini-app privada (hoy: Split de
+gastos, Links guardados) — un solo PIN por cuenta, configurado desde
+Ajustes, con un interruptor propio en cada módulo/mini-app para activarlo o
+desactivarlo. Es un "re-lock" de una sesión ya autenticada (mismo caso de
+uso que documenta `PinLock`), no un mecanismo de login: por eso vive en
+`preferences` del mismo `users/{uid}` de siempre, y no en una colección
+nueva. Las mini-apps públicas (`requiresAuth: false`, ej. Calculadora de
+propinas) quedan fuera a propósito — bloquear con el PIN de una cuenta algo
+que no pide login no tiene sentido. El desbloqueo en el cliente se recuerda
+en `sessionStorage` (`src/lib/security/session-unlock.ts`), no en
+`localStorage`/IndexedDB: se pidió que el candado se vuelva a pedir al
+cerrar y reabrir la app, no en cada cambio de tab dentro de la misma
+sesión.
+
+```mermaid
+erDiagram
+    USERS {
+        object preferences "+pinHash, +lockedModules"
+    }
+```
+
+**Reglas.** Sin cambios — `users/{uid}` ya era de sólo lectura por dueño y
+sin escritura de cliente (`allow write: if false`, todo pasa por Admin SDK
+en las Server Actions de arriba), mismo precedente que `alias`/`avatarUrl`/
+`preferences` (ver más arriba en este documento). Bloque de
+`firestore.rules` reproducido tal cual, sin tocar:
+
+```
+match /users/{uid} {
+  allow read: if isOwner(uid);
+  allow write: if false;
+}
+```
 
 ### 2026-08-03 — Hábitos de grupo: pasos con timeline dentro de un hábito
 

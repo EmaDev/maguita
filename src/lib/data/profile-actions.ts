@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { ROUTES } from "@/lib/app-config";
 import { requireSession } from "@/lib/auth/dal";
@@ -8,6 +9,7 @@ import {
   COLLECTIONS,
   collection,
   DEFAULT_PREFERENCES,
+  FieldValue,
   now,
   type UserDoc,
   type UserPreferences,
@@ -85,4 +87,65 @@ export async function updatePreferencesAction(
     { merge: true }
   );
   revalidatePath(ROUTES.ajustes);
+}
+
+const hashPin = (pin: string) => createHash("sha256").update(pin).digest("hex");
+
+/**
+ * Define, cambia o quita el PIN compartido de PinLock. `null` lo desactiva y
+ * limpia `lockedModules`: no puede quedar un módulo "bloqueado" sin PIN
+ * contra el cual verificar.
+ */
+export async function setPinAction(pin: string | null): Promise<void> {
+  if (pin !== null && !/^\d{4}$/.test(pin)) {
+    throw new Error("El PIN tiene que ser de 4 dígitos.");
+  }
+
+  const session = await requireSession(ROUTES.ajustes);
+  await collection(COLLECTIONS.users)
+    .doc(session.sub)
+    .update({
+      "preferences.pinHash": pin ? hashPin(pin) : null,
+      ...(pin === null && { "preferences.lockedModules": [] }),
+      updatedAt: now(),
+    });
+  revalidatePath(ROUTES.ajustes);
+  revalidatePath(ROUTES.inicio);
+}
+
+/**
+ * Prende o apaga el candado de PinLock de un módulo puntual (un tab de
+ * Inicio o una mini-app). `arrayUnion`/`arrayRemove` en vez de leer-y-pisar:
+ * mismo criterio atómico que `toggleHabitDayAction`
+ * (`src/lib/data/habits-actions.ts`).
+ */
+export async function setModuleLockAction(moduleId: string, locked: boolean): Promise<void> {
+  const session = await requireSession();
+  const ref = collection(COLLECTIONS.users).doc(session.sub);
+
+  const snapshot = await ref.get();
+  if (!snapshot.data()?.preferences?.pinHash) {
+    throw new Error("Configurá un PIN en Ajustes antes de activar el bloqueo.");
+  }
+
+  await ref.update({
+    "preferences.lockedModules": locked
+      ? FieldValue.arrayUnion(moduleId)
+      : FieldValue.arrayRemove(moduleId),
+    updatedAt: now(),
+  });
+  revalidatePath(ROUTES.inicio);
+  revalidatePath(ROUTES.miniAppSplitGastos);
+  revalidatePath(ROUTES.miniAppLinks);
+}
+
+/**
+ * Verifica un código contra el hash guardado. La usa `PinLock.onUnlock`
+ * desde el cliente — nunca se manda el hash al browser.
+ */
+export async function verifyPinAction(code: string): Promise<boolean> {
+  const session = await requireSession();
+  const snapshot = await collection(COLLECTIONS.users).doc(session.sub).get();
+  const pinHash = snapshot.data()?.preferences?.pinHash;
+  return Boolean(pinHash) && pinHash === hashPin(code);
 }

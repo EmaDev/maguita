@@ -228,6 +228,12 @@ export const ChevronDownIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const ChevronRightIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="9 6 15 12 9 18" />
+  </Icon>
+);
+
 /** Grilla de una columna, para el selector de columnas de la tab Notas. */
 export const ColumnOneIcon = (p: IconProps) => (
   <Icon {...p}>

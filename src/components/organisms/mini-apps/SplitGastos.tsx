@@ -3,19 +3,35 @@
 import { useState, type ChangeEvent } from "react";
 import {
   BillSplitter,
+  Button,
   Card,
   Input,
   TagInput,
   useSnackbar,
   type SplitParticipant,
 } from "lib-kit-components";
+import { SettingsIcon } from "@/components/atoms/icons";
+import { PinLockSwitch } from "@/components/molecules/PinLockSwitch";
+import { useAppSheet } from "@/components/shell/app-sheet";
 import { formatMoney } from "@/lib/home-model";
 
+interface SplitGastosProps {
+  pinSet: boolean;
+  locked: boolean;
+}
+
 /** Mini-app privada: divide un gasto entre participantes cargados a mano. Sin persistencia todavía. */
-export function SplitGastos() {
+export function SplitGastos({ pinSet, locked }: SplitGastosProps) {
   const { snack } = useSnackbar();
+  const { openSheet } = useAppSheet();
   const [totalStr, setTotalStr] = useState("");
   const [names, setNames] = useState<string[]>([]);
+
+  const openSettingsSheet = () =>
+    openSheet(<PinLockSwitch moduleId="split-gastos" locked={locked} pinConfigured={pinSet} />, {
+      title: "Ajustes",
+      description: "Privacidad de Split de gastos.",
+    });
 
   const total = Number(totalStr.replace(",", "."));
   const validTotal = Number.isFinite(total) && total > 0;
@@ -30,6 +46,12 @@ export function SplitGastos() {
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button size="icon" variant="ghost" aria-label="Ajustes" onClick={openSettingsSheet}>
+          <SettingsIcon />
+        </Button>
+      </div>
+
       <Card variant="outline" padding="md" className="space-y-4">
         <Input
           label="Monto total"

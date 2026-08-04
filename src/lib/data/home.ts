@@ -4,6 +4,7 @@ import { getActiveExpenseCycle, getExpenseMovements, type ExpenseCycle } from ".
 import { getExpenseCategories, type ExpenseCategoryItem } from "./expense-categories";
 import { getHabits } from "./habits";
 import { getNotes } from "./notes";
+import { getProfile } from "./profile";
 
 /**
  * Datos de la pantalla de Inicio: movimientos, notas y hábitos.
@@ -87,6 +88,8 @@ export interface HomeData {
   expenseCycle: ExpenseCycle | null;
   /** ABM de categorías del usuario (o el set por default si todavía no tocó el ABM). */
   expenseCategories: ExpenseCategoryItem[];
+  /** Estado de PinLock: si hay PIN configurado y qué tabs de Inicio tienen el candado activo. */
+  pinLock: { pinSet: boolean; lockedModules: string[] };
 }
 
 /**
@@ -95,11 +98,12 @@ export interface HomeData {
  * hábitos son todos los suyos.
  */
 export async function getHomeData(userId: string): Promise<HomeData> {
-  const [expenseCycle, expenseCategories, notes, habits] = await Promise.all([
+  const [expenseCycle, expenseCategories, notes, habits, profile] = await Promise.all([
     getActiveExpenseCycle(userId),
     getExpenseCategories(userId),
     getNotes(userId),
     getHabits(userId),
+    getProfile(userId),
   ]);
   const movements = expenseCycle ? await getExpenseMovements(expenseCycle.id) : [];
 
@@ -110,5 +114,9 @@ export async function getHomeData(userId: string): Promise<HomeData> {
     habits,
     expenseCycle,
     expenseCategories,
+    pinLock: {
+      pinSet: Boolean(profile?.preferences.pinHash),
+      lockedModules: profile?.preferences.lockedModules ?? [],
+    },
   };
 }

@@ -16,8 +16,11 @@ import {
   CheckIcon,
   ColumnOneIcon,
   ColumnTwoIcon,
+  SettingsIcon,
   TrashIcon,
 } from "@/components/atoms/icons";
+import { useAppSheet } from "@/components/shell/app-sheet";
+import { PinLockSwitch } from "@/components/molecules/PinLockSwitch";
 import { deleteNotesAction } from "@/lib/data/notes-actions";
 import type { Note } from "@/lib/data/home";
 import { formatDay, formatShortDate, sortNotes } from "@/lib/home-model";
@@ -62,10 +65,13 @@ interface NotesPanelProps {
   notes: Note[];
   /** Contador del FAB de Inicio para enfocar el composer. Ver `NoteComposer`. */
   focusSignal?: number;
+  pinSet: boolean;
+  locked: boolean;
 }
 
-export function NotesPanel({ today, notes, focusSignal }: NotesPanelProps) {
+export function NotesPanel({ today, notes, focusSignal, pinSet, locked }: NotesPanelProps) {
   const { snack } = useSnackbar();
+  const { openSheet } = useAppSheet();
   const [filters, setFilters] = useState<ProductFilterValue>(DEFAULT_FILTERS);
   const [selecting, setSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
@@ -172,8 +178,20 @@ export function NotesPanel({ today, notes, focusSignal }: NotesPanelProps) {
     });
   }
 
+  const openSettingsSheet = () =>
+    openSheet(<PinLockSwitch moduleId="notas" locked={locked} pinConfigured={pinSet} />, {
+      title: "Ajustes",
+      description: "Privacidad de la tab Notas.",
+    });
+
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button size="icon" variant="ghost" aria-label="Ajustes" onClick={openSettingsSheet}>
+          <SettingsIcon />
+        </Button>
+      </div>
+
       <NoteComposer today={today} focusSignal={focusSignal} />
 
       {notes.length > 0 && (

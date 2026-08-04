@@ -6,6 +6,7 @@ import { FlameIcon, NoteIcon, ReceiptIcon, ShareIcon } from "@/components/atoms/
 import { useAppSheet } from "@/components/shell/app-sheet";
 import { useShellTabs } from "@/components/shell/shell-tabs";
 import { ShareAppSheet } from "@/components/organisms/quick-actions";
+import { ModuleLockGate } from "@/components/organisms/security/ModuleLockGate";
 import { APP_NAME } from "@/lib/app-config";
 import { HabitComposer } from "./home/HabitComposer";
 import { HabitsPanel } from "./home/HabitsPanel";
@@ -161,23 +162,49 @@ export function HomeBoard({ data }: { data: HomeData }) {
     ]
   );
 
+  const { pinSet, lockedModules } = data.pinLock;
+  const isLocked = (moduleId: string) => pinSet && lockedModules.includes(moduleId);
+
   let panel: ReactNode;
   switch (active) {
     case "movimientos":
       panel = (
-        <MovementsPanel
-          today={today}
-          expenseCycle={data.expenseCycle}
-          cycleMovements={data.movements}
-          expenseCategories={data.expenseCategories}
-        />
+        <ModuleLockGate moduleId="movimientos" moduleLabel="Movimientos" locked={isLocked("movimientos")}>
+          <MovementsPanel
+            today={today}
+            expenseCycle={data.expenseCycle}
+            cycleMovements={data.movements}
+            expenseCategories={data.expenseCategories}
+            pinSet={pinSet}
+            locked={isLocked("movimientos")}
+          />
+        </ModuleLockGate>
       );
       break;
     case "notas":
-      panel = <NotesPanel today={today} notes={notes} focusSignal={noteFocusSignal} />;
+      panel = (
+        <ModuleLockGate moduleId="notas" moduleLabel="Notas" locked={isLocked("notas")}>
+          <NotesPanel
+            today={today}
+            notes={notes}
+            focusSignal={noteFocusSignal}
+            pinSet={pinSet}
+            locked={isLocked("notas")}
+          />
+        </ModuleLockGate>
+      );
       break;
     case "habitos":
-      panel = <HabitsPanel today={today} habits={data.habits} />;
+      panel = (
+        <ModuleLockGate moduleId="habitos" moduleLabel="Hábitos" locked={isLocked("habitos")}>
+          <HabitsPanel
+            today={today}
+            habits={data.habits}
+            pinSet={pinSet}
+            locked={isLocked("habitos")}
+          />
+        </ModuleLockGate>
+      );
       break;
     default:
       panel = (

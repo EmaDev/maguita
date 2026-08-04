@@ -13,14 +13,22 @@ function normalizeUrl(raw: string): URL {
   return new URL(withProtocol);
 }
 
+/** `""`/sólo espacios cuenta como "no puso nada" — se guarda `null`, no un string vacío. */
+const orNull = (value: string | undefined) => value?.trim() || null;
+
 /**
  * Alta de un link. Trae los metatags Open Graph del lado del server
  * (`fetchLinkMetadata`, evita CORS del browser contra sitios de terceros) y
  * los guarda ya resueltos — si el fetch falla o el sitio no publica
  * metatags, el link igual se guarda con la URL y el dominio como único dato,
- * sin bloquear el alta.
+ * sin bloquear el alta. `note`/`category` son del usuario, no de los
+ * metatags — opcionales, se pueden completar acá o después con
+ * `updateLinkAction`.
  */
-export async function addLinkAction(rawUrl: string): Promise<void> {
+export async function addLinkAction(
+  rawUrl: string,
+  extra?: { note?: string; category?: string }
+): Promise<void> {
   const session = await requireSession(ROUTES.miniAppLinks);
 
   let parsed: URL;
@@ -43,10 +51,38 @@ export async function addLinkAction(rawUrl: string): Promise<void> {
     image: metadata.image,
     siteName: metadata.siteName,
     domain: parsed.hostname.replace(/^www\./, ""),
+    note: orNull(extra?.note),
+    category: orNull(extra?.category),
     createdAt: now(),
     updatedAt: now(),
   });
 
+  revalidatePath(ROUTES.miniAppLinks);
+}
+
+/**
+ * Edita la descripción y/o categoría propias de un link ya guardado (no
+ * toca los metatags). Re-verifica dueño antes de escribir, mismo criterio
+ * que `deleteLinkAction`.
+ */
+export async function updateLinkAction(
+  linkId: string,
+  updates: { note?: string; category?: string }
+): Promise<void> {
+  const session = await requireSession(ROUTES.miniAppLinks);
+
+  const ref = collection(COLLECTIONS.links).doc(linkId);
+  const snapshot = await ref.get();
+  const data = snapshot.data();
+  if (!data || data.ownerId !== session.sub) {
+    throw new Error("Ese link no existe.");
+  }
+
+  await ref.update({
+    note: orNull(updates.note),
+    category: orNull(updates.category),
+    updatedAt: now(),
+  });
   revalidatePath(ROUTES.miniAppLinks);
 }
 

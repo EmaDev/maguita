@@ -103,7 +103,12 @@ export const SCREEN_HEADERS: Record<string, ScreenHeader> = {
   [ROUTES.miniAppCalculadoraPropinas]: { title: "Calculadora de propinas", back: true },
   [ROUTES.miniAppSplitGastos]: { title: "Split de gastos", back: true },
   [ROUTES.miniAppGeneradorQr]: { title: "Generador de QR", back: true },
-  [ROUTES.miniAppLinks]: { title: "Links guardados", back: true },
+  [ROUTES.miniAppLinks]: {
+    title: "Links guardados",
+    back: true,
+    searchable: true,
+    searchPlaceholder: "Buscar por URL, descripción o categoría…",
+  },
   /* La entrada existe siempre, aunque la pantalla sólo se renderice con
      `DEV_TOOLS=true`: este mapa es sólo el título del header, y quien no tenga
      la flag prendida recibe un 404 antes de llegar a verlo. */

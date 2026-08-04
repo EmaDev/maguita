@@ -22,10 +22,12 @@ import {
   GripIcon,
   PencilIcon,
   PlusIcon,
+  SettingsIcon,
   SparkleIcon,
   TrashIcon,
 } from "@/components/atoms/icons";
 import { useAppSheet } from "@/components/shell/app-sheet";
+import { PinLockSwitch } from "@/components/molecules/PinLockSwitch";
 import {
   deleteHabitAction,
   reorderHabitsAction,
@@ -59,6 +61,8 @@ import { WEEKDAY_CHIPS } from "./habit-options";
 interface HabitsPanelProps {
   today: string;
   habits: Habit[];
+  pinSet: boolean;
+  locked: boolean;
 }
 
 /** Chip de racha. Se remonta con cada cambio de `streak` para que el número entre animado. */
@@ -335,11 +339,18 @@ function HabitRow({ habit, today, deleting, onToggle, onToggleAction, onEdit, on
   );
 }
 
-export function HabitsPanel({ today, habits }: HabitsPanelProps) {
+export function HabitsPanel({ today, habits, pinSet, locked }: HabitsPanelProps) {
   const { snack } = useSnackbar();
   const { haptic } = useHaptics();
   const { openSheet, closeSheet } = useAppSheet();
   const [deleting, startDeleting] = useTransition();
+
+  function openSettingsSheet() {
+    openSheet(<PinLockSwitch moduleId="habitos" locked={locked} pinConfigured={pinSet} />, {
+      title: "Ajustes",
+      description: "Privacidad de la tab Hábitos.",
+    });
+  }
 
   /**
    * Aplica el toggle sobre el hábito tocado sin esperar al server. Devuelve
@@ -500,12 +511,19 @@ export function HabitsPanel({ today, habits }: HabitsPanelProps) {
   // constancia quedarían en cero, que se lee como un error y no como un vacío.
   if (habits.length === 0) {
     return (
-      <PageStatusScreen
-        status="empty"
-        title="Todavía no hay hábitos"
-        description="Cuando sumes uno, acá vas a ver el check del día, la racha y tu constancia."
-        primary={{ label: "Crear hábito", onClick: () => openComposer() }}
-      />
+      <div className="space-y-4">
+        <div className="flex justify-end">
+          <Button size="icon" variant="ghost" aria-label="Ajustes" onClick={openSettingsSheet}>
+            <SettingsIcon />
+          </Button>
+        </div>
+        <PageStatusScreen
+          status="empty"
+          title="Todavía no hay hábitos"
+          description="Cuando sumes uno, acá vas a ver el check del día, la racha y tu constancia."
+          primary={{ label: "Crear hábito", onClick: () => openComposer() }}
+        />
+      </div>
     );
   }
 
@@ -558,10 +576,15 @@ export function HabitsPanel({ today, habits }: HabitsPanelProps) {
         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
           Tus hábitos
         </p>
-        <Button size="sm" variant="ghost" onClick={() => openComposer()}>
-          <PlusIcon className="h-4 w-4" />
-          Nuevo
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button size="icon" variant="ghost" aria-label="Ajustes" onClick={openSettingsSheet}>
+            <SettingsIcon />
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => openComposer()}>
+            <PlusIcon className="h-4 w-4" />
+            Nuevo
+          </Button>
+        </div>
       </div>
 
       <Reorder.Group

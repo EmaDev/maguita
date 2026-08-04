@@ -13,6 +13,12 @@ export interface SavedLink {
   image: string | null;
   siteName: string | null;
   domain: string;
+  /** Descripción propia del usuario (distinta de `description`, la de los metatags). */
+  note: string | null;
+  /** Categoría libre del usuario. */
+  category: string | null;
+  /** `createdAt` en milisegundos — se manda ya resuelto porque un `Timestamp` de Firestore no serializa a un Client Component. */
+  createdAt: number;
 }
 
 /**
@@ -35,5 +41,8 @@ export async function getLinks(userId: string): Promise<SavedLink[]> {
       image: data.image,
       siteName: data.siteName,
       domain: data.domain,
+      note: data.note ?? null,
+      category: data.category ?? null,
+      createdAt: data.createdAt?.toMillis() ?? 0,
     }));
 }

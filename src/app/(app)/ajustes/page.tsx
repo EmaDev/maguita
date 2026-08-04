@@ -16,6 +16,7 @@ export default async function AjustesPage() {
     <SettingsPanel
       user={toCurrentUser(session, profile)}
       avatarUrl={profile?.avatarUrl ?? null}
+      pinSet={Boolean(profile?.preferences.pinHash)}
       logoutAction={logout}
       devTools={isDevToolsEnabled()}
     />

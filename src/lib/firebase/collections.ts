@@ -68,6 +68,14 @@ export interface UserPreferences {
   theme: "light" | "dark" | "system";
   haptics: boolean;
   reduceData: boolean;
+  /** sha256 hex del PIN de 4 dígitos compartido. `null` = PinLock desactivado, no puede haber ningún módulo bloqueado. */
+  pinHash: string | null;
+  /**
+   * Ids de módulos/mini-apps con el candado de PinLock activo. Mismos ids que
+   * `HomeTab` ("movimientos"/"notas"/"habitos", ver `home/tabs.ts`) para los
+   * tabs de Inicio, o `MiniApp.id` (`lib/data/mini-apps.ts`) para mini-apps.
+   */
+  lockedModules: string[];
 }
 
 /** Mismos defaults que ya usa el cliente hoy desde `localStorage` (ver `lib/theme.ts` y `SettingsPanel`). */
@@ -75,6 +83,8 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   theme: "system",
   haptics: true,
   reduceData: false,
+  pinHash: null,
+  lockedModules: [],
 };
 
 export interface UserDoc {
@@ -186,6 +196,10 @@ export interface LinkDoc {
   siteName: string | null;
   /** Host sin `www.`, ej. "github.com" — evita parsear `url` en el cliente sólo para mostrarlo. */
   domain: string;
+  /** Descripción propia del usuario, distinta de `description` (la de los metatags). `null` = no puso ninguna. */
+  note: string | null;
+  /** Categoría libre del usuario, ej. "Trabajo", "Recetas". `null` = sin categorizar. */
+  category: string | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
