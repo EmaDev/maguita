@@ -1,5 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
+import { dispatchHabitPenalties } from "@/lib/notifications/dispatch-habit-penalties";
+import { dispatchHabitReminders } from "@/lib/notifications/dispatch-habit-reminders";
 import { dispatchNoteAlerts } from "@/lib/notifications/dispatch-note-alerts";
 
 /**
@@ -62,8 +64,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const notes = await dispatchNoteAlerts();
-    return Response.json({ ok: true, notes });
+    const [notes, habitReminders, habitPenalties] = await Promise.all([
+      dispatchNoteAlerts(),
+      dispatchHabitReminders(),
+      dispatchHabitPenalties(),
+    ]);
+    return Response.json({ ok: true, notes, habitReminders, habitPenalties });
   } catch (error) {
     console.error("[dispatch] falló la corrida", error);
     // 500 para que el cron lo cuente como fallo y reintente en la próxima

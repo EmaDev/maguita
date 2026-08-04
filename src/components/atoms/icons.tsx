@@ -197,6 +197,18 @@ export const MoreIcon = (p: IconProps) => (
   </Icon>
 );
 
+/** Seis puntitos en dos columnas: handle de arrastre para reordenar una lista. Van rellenos, no trazados. */
+export const GripIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="9" cy="5" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="19" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="5" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="19" r="1.4" fill="currentColor" stroke="none" />
+  </Icon>
+);
+
 export const PencilIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M4 20l.8-4L16 4.8a1.8 1.8 0 0 1 2.5 0l.7.7a1.8 1.8 0 0 1 0 2.5L8 19.2 4 20Z" />

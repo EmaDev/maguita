@@ -45,12 +45,31 @@ export interface Note {
 export interface Habit {
   id: string;
   name: string;
+  /** Bajada libre y corta. `null` = sin subtítulo. */
+  subtitle: string | null;
   /** Emoji que identifica al hábito en la lista. */
   emoji: string;
   /** Días cumplidos, en formato `yyyy-mm-dd`. Sin duplicados ni orden garantizado. */
   doneDates: string[];
-  /** Meta de días por semana (1 a 7). Informativa: no afecta el cálculo de la racha. */
-  goalPerWeek: number;
+  /** Días de la semana en que aplica, `Date.getDay()` (0=domingo…6=sábado). 1 a 7 valores. */
+  scheduledWeekdays: number[];
+  /** Si hay que avisar a una hora fija los días programados. */
+  alertEnabled: boolean;
+  /** `HH:mm`, hora local. `null` si `alertEnabled` es `false`. */
+  alertTime: string | null;
+  /** Puntaje acumulado (sube al cumplir, baja al perder un día programado). */
+  score: number;
+  /** Posición manual en la lista (drag & drop). */
+  order: number;
+  /** Pasos del hábito, en orden. `[]` = hábito "simple". No vacío = se muestra como timeline. */
+  actions: HabitAction[];
+}
+
+export interface HabitAction {
+  id: string;
+  name: string;
+  /** Días cumplidos de este paso, `yyyy-mm-dd`. Se resetea cada día como `Habit.doneDates`. */
+  doneDates: string[];
 }
 
 export interface HomeData {

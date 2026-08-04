@@ -1,4 +1,4 @@
-import type { Habit, Movement, Note, NotePriority } from "@/lib/data/home";
+import type { Habit, HabitAction, Movement, Note, NotePriority } from "@/lib/data/home";
 import type { ExpenseCycle } from "@/lib/data/expenses";
 
 /**
@@ -157,6 +157,42 @@ export function weekCountOf(doneDates: string[], today: string): number {
   return count;
 }
 
+/** Día de la semana de una day key, `Date.getDay()` (0=domingo…6=sábado). */
+export function weekdayOf(day: string): number {
+  return parseDay(day).getDay();
+}
+
+/** `true` si `day` cae en uno de los días programados del hábito. */
+export function isScheduledOn(scheduledWeekdays: number[], day: string): boolean {
+  return scheduledWeekdays.includes(weekdayOf(day));
+}
+
+/**
+ * Puntos que suma marcar un día programado (y que resta desmarcarlo). Se
+ * comparte entre `toggleHabitDayAction` y `dispatch-habit-penalties.ts` para
+ * que los dos números no se desincronicen en dos archivos distintos.
+ */
+export const HABIT_COMPLETION_POINTS = 1;
+
+/** Puntos que resta el job diario cuando se pasa un día programado sin marcar. */
+export const HABIT_PENALTY_POINTS = 2;
+
+/**
+ * `true` si `day` está cumplido en **todas** las acciones de un hábito de
+ * grupo. Con `actions: []` (hábito simple) da `false` siempre — la usa
+ * `toggleHabitActionAction` para decidir si mueve `doneDates`/`score`, y el
+ * estado optimista de `HabitsPanel` para que el cliente calcule lo mismo sin
+ * esperar al server.
+ */
+export function allActionsDoneOn(actions: HabitAction[], day: string): boolean {
+  return actions.length > 0 && actions.every((action) => action.doneDates.includes(day));
+}
+
+/** Cuántas acciones de un hábito de grupo están cumplidas hoy — para el badge "X/N". */
+export function actionsDoneCountOn(actions: HabitAction[], day: string): number {
+  return actions.filter((action) => action.doneDates.includes(day)).length;
+}
+
 export interface HabitsToday {
   done: number;
   total: number;
@@ -164,15 +200,40 @@ export interface HabitsToday {
   bestStreak: number;
 }
 
+/**
+ * Progreso del día, sólo entre los hábitos programados para hoy: uno que no
+ * le toca hoy no debe exigirse marcado ni contar en el total del anillo.
+ */
 export function habitsToday(habits: Habit[], today: string): HabitsToday {
+  const scheduledToday = habits.filter((habit) => isScheduledOn(habit.scheduledWeekdays, today));
   return {
-    done: habits.filter((habit) => habit.doneDates.includes(today)).length,
-    total: habits.length,
+    done: scheduledToday.filter((habit) => habit.doneDates.includes(today)).length,
+    total: scheduledToday.length,
     bestStreak: habits.reduce(
       (best, habit) => Math.max(best, streakOf(habit.doneDates, today)),
       0
     ),
   };
+}
+
+/**
+ * Días cumplidos en los últimos 7 días corridos que además estaban
+ * programados — a diferencia de `weekCountOf`, no cuenta un día marcado
+ * fuera de horario (ej. historial cargado antes de que el hábito tuviera
+ * horario), para que la barra semanal no muestre más que la meta.
+ */
+export function scheduledWeekCountOf(
+  doneDates: string[],
+  scheduledWeekdays: number[],
+  today: string
+): number {
+  const done = new Set(doneDates);
+  let count = 0;
+  for (let offset = 0; offset < 7; offset += 1) {
+    const day = shiftDay(today, -offset);
+    if (done.has(day) && isScheduledOn(scheduledWeekdays, day)) count += 1;
+  }
+  return count;
 }
 
 /** Más reciente primero; a igual día, el orden original (el seed ya viene ordenado). */

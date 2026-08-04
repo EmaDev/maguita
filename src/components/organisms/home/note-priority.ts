@@ -30,12 +30,6 @@ export const NOTE_PRIORITY_LABEL: Record<NotePriority, string> = {
   high: "Alta",
 };
 
-export const NOTE_PRIORITY_TONE: Record<NotePriority, string> = {
-  low: "bg-surface-alt text-muted",
-  medium: "bg-accent/12 text-accent",
-  high: "bg-danger/12 text-danger",
-};
-
 /**
  * Papel del post-it de cada prioridad (tokens `--color-note-*`, con su
  * variante oscura en `globals.css`). Clases literales enteras a propósito:

@@ -194,18 +194,71 @@ export interface HabitDoc {
   ownerId: string;
   /** Nombre libre, ej. "Leer 20 minutos". */
   name: string;
+  /** Bajada libre y corta, ej. "Antes de dormir". `null` = sin subtítulo. */
+  subtitle: string | null;
   /** Emoji que identifica el hábito en la lista (elegido de una paleta fija en el composer). */
   emoji: string;
-  /** Meta de días por semana (1 a 7). Informativa: no afecta el cálculo de la racha. */
-  goalPerWeek: number;
+  /**
+   * Días de la semana en que aplica el hábito, convención `Date.getDay()`
+   * (0 = domingo … 6 = sábado). 1 a 7 valores únicos. Reemplaza al viejo
+   * `goalPerWeek`: la meta semanal ahora es `scheduledWeekdays.length`.
+   */
+  scheduledWeekdays: number[];
+  /** Si hay que avisar a una hora fija los días programados. */
+  alertEnabled: boolean;
+  /** `HH:mm`, hora local del dueño. `null` si `alertEnabled` es `false`. */
+  alertTime: string | null;
+  /**
+   * Puntaje acumulado. Sube al marcar un día programado, baja al
+   * desmarcarlo o cuando el job diario detecta que se perdió uno (ver
+   * `dispatch-habit-penalties.ts`). Puede ser negativo.
+   */
+  score: number;
+  /** Posición manual en la lista (drag & drop). Menor = más arriba. */
+  order: number;
+  /**
+   * Último día (`yyyy-mm-dd`, local del dueño) ya penalizado por perder un
+   * día programado. Evita que el job de penalización reste dos veces por el
+   * mismo día en corridas sucesivas del cron.
+   */
+  lastPenalizedDay: string | null;
   /**
    * Días cumplidos, `yyyy-mm-dd`. Se escribe sólo con `arrayUnion`/
    * `arrayRemove` (ver `toggleHabitDayAction`), así que no tiene duplicados,
    * pero tampoco orden garantizado: quien lo lea debe ordenarlo si lo necesita.
+   *
+   * Para un hábito con `actions`, este campo se vuelve **derivado**: sólo se
+   * prende un día acá cuando *todas* las acciones de ese día están cumplidas
+   * (ver `toggleHabitActionAction`). Con `actions: []` (hábito simple) sigue
+   * siendo la fuente directa, como siempre.
    */
   doneDates: string[];
+  /**
+   * Pasos del hábito, en el orden en que se muestran. `[]` = hábito
+   * "simple" (un solo check, comportamiento de siempre). No vacío = hábito
+   * "de grupo": se muestra como timeline y el día sólo cuenta como cumplido
+   * cuando se tildan todos.
+   */
+  actions: HabitActionDoc[];
+  /**
+   * Días cumplidos por acción, clave = `HabitActionDoc.id`. Un mapa y no un
+   * array anidado dentro de `actions` porque Firestore no permite
+   * `arrayUnion`/`arrayRemove` apuntado a un campo *dentro* de un elemento
+   * de array (no hay forma de direccionar "el elemento con id X" en una
+   * escritura) — un mapa sí soporta rutas de campo por clave
+   * (`actionDoneDates.${actionId}`), así que cada acción puede actualizar su
+   * propio historial atómicamente, igual que `doneDates` del hábito.
+   */
+  actionDoneDates: Record<string, string[]>;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+export interface HabitActionDoc {
+  /** Generado en el cliente (`crypto.randomUUID()`), estable entre ediciones. */
+  id: string;
+  /** Nombre libre del paso. Máx. 60 caracteres, igual tope que `HabitDoc.name`. */
+  name: string;
 }
 
 /**

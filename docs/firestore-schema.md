@@ -99,9 +99,17 @@ erDiagram
     HABITS {
         string ownerId
         string name "ej. Leer 20 minutos"
+        string subtitle "nullable, bajada libre y corta"
         string emoji "de una paleta fija, no input libre"
-        number goalPerWeek "1 a 7, informativa: no afecta la racha"
-        string_array doneDates "yyyy-mm-dd, sin duplicados ni orden garantizado"
+        number_array scheduledWeekdays "Date.getDay(), 0-6, 1 a 7 valores"
+        boolean alertEnabled
+        string alertTime "HH:mm local, nullable si alertEnabled es false"
+        number score "sube al cumplir, baja al perder un día programado"
+        number order "posición manual, drag & drop"
+        string lastPenalizedDay "yyyy-mm-dd, nullable"
+        string_array doneDates "yyyy-mm-dd — derivado de actions cuando actions no está vacío"
+        HabitActionDoc_array actions "[] = hábito simple, no vacío = grupo con timeline"
+        map actionDoneDates "actionId -> yyyy-mm-dd[], historial por paso"
         timestamp createdAt
         timestamp updatedAt
     }
@@ -483,15 +491,26 @@ campo que `notes`/`links` — muchos hábitos por usuario, con un tope de 50
 |---|---|---|
 | `ownerId` | `string` | uid del dueño |
 | `name` | `string` | nombre libre, ej. "Leer 20 minutos". Máx. 60 caracteres |
+| `subtitle` | `string \| null` | bajada libre y corta, máx. 80 caracteres. `null` = sin subtítulo |
 | `emoji` | `string` | de la paleta fija de `habit-options.ts`, no un input libre |
-| `goalPerWeek` | `number` | meta de días por semana, 1 a 7. **Informativa**: no entra en el cálculo de la racha, sólo en la barra de progreso semanal |
-| `doneDates` | `string[]` | días cumplidos, `yyyy-mm-dd`. Sólo se escribe con `arrayUnion`/`arrayRemove`: sin duplicados, pero **sin orden garantizado** |
+| `scheduledWeekdays` | `number[]` | días de la semana en que aplica, `Date.getDay()` (0=domingo…6=sábado). 1 a 7 valores únicos. Reemplazó a `goalPerWeek`: la meta semanal es `scheduledWeekdays.length` |
+| `alertEnabled` | `boolean` | si hay que avisar a una hora fija los días programados |
+| `alertTime` | `string \| null` | `HH:mm` local del dueño. `null` si `alertEnabled` es `false` |
+| `score` | `number` | puntaje acumulado. Sube al marcar un día programado, baja al desmarcarlo o cuando se pierde uno (job diario). Puede ser negativo |
+| `order` | `number` | posición manual en la lista (drag & drop). Menor = más arriba |
+| `lastPenalizedDay` | `string \| null` | último día (`yyyy-mm-dd`, local del dueño) ya penalizado — evita que el job de penalización reste dos veces por el mismo día |
+| `doneDates` | `string[]` | días cumplidos, `yyyy-mm-dd`. Sólo se escribe con `arrayUnion`/`arrayRemove`: sin duplicados, pero **sin orden garantizado**. Con `actions` no vacío, es **derivado**: sólo se prende un día cuando todas las acciones de ese día están cumplidas |
+| `actions` | `HabitActionDoc[]` | pasos del hábito, `{ id, name }`, en el orden en que se muestran. `[]` = hábito simple (comportamiento de siempre). No vacío = hábito de grupo, se muestra como timeline. Tope de 20 |
+| `actionDoneDates` | `Record<string, string[]>` | días cumplidos por acción, clave = `HabitActionDoc.id`. Se actualiza con `arrayUnion`/`arrayRemove` sobre una ruta de campo (`actionDoneDates.${actionId}`), no sobre `doneDates` directo |
 | `createdAt` / `updatedAt` | `Timestamp` | — |
 
 Accesores: `getHabits` (`src/lib/data/habits.ts`, sólo Server Components),
-`addHabitAction` / `toggleHabitDayAction` / `updateHabitAction` /
-`deleteHabitAction` (`src/lib/data/habits-actions.ts`, Server Actions — todas
-re-verifican la sesión y el dueño del documento).
+`addHabitAction` / `toggleHabitDayAction` / `toggleHabitActionAction` /
+`updateHabitAction` / `reorderHabitsAction` / `deleteHabitAction`
+(`src/lib/data/habits-actions.ts`, Server Actions — todas re-verifican la
+sesión y el dueño del documento), más los emisores programados
+`dispatchHabitReminders` / `dispatchHabitPenalties`
+(`src/lib/notifications/dispatch-habit-*.ts`).
 
 Decisiones de diseño:
 
@@ -517,19 +536,57 @@ Decisiones de diseño:
   ensuciar `doneDates` con strings que después rompan la grilla; qué día es
   "hoy" queda del lado del cliente. Como el dato es sólo del propio usuario,
   el peor caso es que alguien se infle su propia racha.
-- **Orden de lectura ascendente por `createdAt`**, al revés que `notes` y
-  `links`: la lista es una checklist que se marca todos los días, y que un
-  hábito nuevo se meta arriba movería de lugar los que el usuario ya tiene
-  memorizados.
+- **Orden manual por `order`, con `createdAt` como respaldo.** La lista se
+  ordena por `order` (drag & drop en `HabitsPanel`, `reorderHabitsAction`
+  reescribe el campo de todos los hábitos afectados en un solo batch). Un
+  hábito cargado antes de que `order` existiera cae a su `createdAt` — mismo
+  criterio de antigüedad ascendente que regía antes de este campo — y se
+  "cura" solo la primera vez que el usuario arrastra la lista, sin script de
+  migración.
 - **Tope de 50 hábitos por cuenta.** La tab los muestra todos juntos sin
   paginar y el `doneDates` de cada uno viaja entero en cada carga de Inicio
   — que es una pantalla compartida con movimientos y notas, no sólo de
   hábitos.
 - **La racha no se guarda, se deriva.** `streakOf`/`longestStreakOf`/
-  `weekCountOf` (`src/lib/home-model.ts`) la calculan a partir de
+  `scheduledWeekCountOf` (`src/lib/home-model.ts`) la calculan a partir de
   `doneDates` en cada render. Guardarla como campo obligaría a mantenerla
   sincronizada en cada toggle y a recalcularla igual cuando pasa la
   medianoche sin que nadie escriba nada.
+- **El puntaje sí se guarda, no se deriva.** A diferencia de la racha,
+  `score` necesita sobrevivir a un evento que nadie dispara (el día
+  programado que se *deja pasar* sin marcar), así que no hay array del que
+  recalcularlo: lo escribe `toggleHabitDayAction` con `FieldValue.increment`
+  en cada marcado/desmarcado de un día programado, y lo ajusta
+  `dispatchHabitPenalties` cuando detecta uno perdido.
+- **La alerta no usa un `alertAt` como las notas.** `NoteDoc.alertAt` es un
+  instante único; el aviso de un hábito se repite cada día programado, así
+  que guardar un solo `Timestamp` no alcanzaría — en cambio
+  `dispatchHabitReminders` evalúa `alertTime` contra la hora local del dueño
+  en cada corrida del cron (ver `resolveNotificationPreferences`/
+  `localTimeIn`).
+- **`lastPenalizedDay` es el único estado nuevo que rompe el patrón "sin
+  estado" de `dispatch-note-alerts.ts`.** Ahí no hacía falta porque la
+  idempotencia salía de comparar contra el reloj (una alerta vencida vence
+  una sola vez); acá "se perdió el día programado de ayer" sigue siendo
+  cierto las 24 horas de hoy, así que sin este campo el job restaría puntos
+  en cada corrida del cron en vez de una sola vez por día perdido.
+- **El historial de cada acción va en un `map` (`actionDoneDates`), no en un
+  array anidado dentro de `actions`.** Firestore no permite `arrayUnion`/
+  `arrayRemove` apuntado a un campo *dentro* de un elemento de un array — no
+  hay forma de direccionar "el elemento con id X" en una escritura, sólo se
+  puede reescribir el array entero. Los mapas sí soportan rutas de campo por
+  clave (`actionDoneDates.${actionId}`), así que cada acción actualiza su
+  propio historial atómicamente, igual mecánica que `doneDates` del hábito.
+  `actions` en cambio sí es un array (sólo id + nombre, sin historial): se
+  reescribe entero al agregar/quitar/renombrar un paso, operación poco
+  frecuente que no necesita esa atomicidad.
+- **`doneDates`/`score` de un hábito de grupo son derivados de las
+  acciones, no de un toggle directo.** `toggleHabitActionAction` recalcula
+  en memoria (sobre lo que ya trajo `getOwnedHabit` más el cambio, mismo
+  patrón que `notifyStreakMilestone`) si con este toggle *todas* las
+  acciones quedan cumplidas hoy, y sólo ahí — no en cada toggle de un paso
+  individual — mueve `doneDates`/`score`/hitos de racha. `toggleHabitDayAction`
+  no cambia: sigue sirviendo a los hábitos simples (`actions: []`).
 
 ### `notifications/{notificationId}`, `pushSubscriptions/{hash}` y `notificationPreferences/{uid}`
 
@@ -803,6 +860,144 @@ documento entero, campos nuevos incluidos — Firestore no tiene reglas a
 nivel de campo para lectura.
 
 ## Changelog
+
+### 2026-08-03 — Hábitos de grupo: pasos con timeline dentro de un hábito
+
+**Qué cambió.** `HabitDoc` sumó dos campos: `actions` (`HabitActionDoc[]`,
+sólo `{ id, name }`) y `actionDoneDates` (`Record<string, string[]>`, el
+historial de días cumplidos de cada acción). Nueva Server Action
+`toggleHabitActionAction` (`src/lib/data/habits-actions.ts`) para marcar/
+desmarcar un paso puntual. `addHabitAction`/`updateHabitAction` ahora
+también reciben `actions`, y `updateHabitAction` reconcilia
+`actionDoneDates` contra los ids vigentes al editar. `getHabits` resuelve
+cada acción con su `doneDates` ya armado desde el mapa.
+
+**Por qué.** Un hábito puede ser ahora una rutina con varios pasos (ej.
+"Rutina matutina" → Tomar agua / Estirar / Ducha fría / Desayunar), cada uno
+marcable por separado y mostrado como timeline. No es una colección nueva:
+sigue siendo el mismo `Habit` de siempre, con el mismo horario, alerta,
+racha, puntaje y orden manual — `actions: []` (el default) es el hábito
+simple de toda la vida, sin ningún cambio de comportamiento. El día del
+hábito cuenta como cumplido (`doneDates`, racha, puntaje) recién cuando
+**todas** las acciones de ese día están tildadas.
+
+```mermaid
+erDiagram
+    HABITS ||--o{ HABIT_ACTIONS : "actions[]"
+    HABIT_ACTIONS {
+        string id "generado en el cliente"
+        string name "máx. 60 caracteres"
+    }
+```
+
+**Decisión de diseño principal — un `map`, no un array anidado, para el
+historial de cada acción.** `doneDates` de una acción no puede vivir dentro
+de `actions: HabitActionDoc[]`: Firestore no permite `arrayUnion`/
+`arrayRemove` apuntado a un campo *dentro* de un elemento de array — no hay
+forma de direccionar "el elemento con id X" en una escritura, sólo
+reescribir el array entero. Los mapas sí soportan rutas de campo por clave,
+así que `actionDoneDates.${actionId}` se actualiza atómicamente igual que
+`doneDates` del hábito, mientras que `actions` (sin historial, sólo
+definición) se reescribe entero en las ediciones — poco frecuentes, no
+necesitan esa atomicidad. Ver el resto de las decisiones (por qué
+`doneDates`/`score` del hábito quedan *derivados* de las acciones) en la
+sección [`habits/{habitId}`](#habitshabitid).
+
+**Reglas.** Sin cambios. `habits` ya era de sólo lectura por `ownerId` para
+el cliente — los campos nuevos no lo cambian, todas las escrituras
+(incluida `toggleHabitActionAction`) siguen pasando por Server Actions con
+Admin SDK. Bloque de `firestore.rules` reproducido tal cual, sin tocar:
+
+```
+    match /habits/{habitId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+```
+
+**Índices.** Ninguno nuevo — `actions`/`actionDoneDates` no se consultan por
+sí solos, sólo se leen junto con el resto del documento.
+
+### 2026-08-03 — Hábitos: subtítulo, horario semanal, alerta a hora fija, puntaje y orden manual
+
+**Qué cambió.** `HabitDoc` sumó seis campos: `subtitle`, `scheduledWeekdays`,
+`alertEnabled`/`alertTime`, `score`, `order` y `lastPenalizedDay`; y perdió
+`goalPerWeek`. Con eso:
+
+- Cada hábito puede tener un subtítulo libre y corto.
+- El viejo "objetivo semanal" (1 a 7, sin días concretos) se reemplaza por
+  `scheduledWeekdays`: qué días de la semana aplica de verdad (ej. "sólo
+  martes y jueves"). La meta semanal ahora es `scheduledWeekdays.length`.
+- Alerta opcional a una hora fija (`alertEnabled`/`alertTime`), disparada por
+  un job nuevo (`dispatchHabitReminders`).
+- Puntaje (`score`): `+1` al marcar un día programado, `-1` al desmarcarlo,
+  `-2` cuando otro job nuevo (`dispatchHabitPenalties`) detecta que se pasó
+  un día programado sin marcar.
+- Orden manual de la lista (`order`, drag & drop), con `reorderHabitsAction`
+  reescribiéndolo en batch.
+
+**Por qué.** Pedido directo: sumar contexto a cada hábito (subtítulo),
+poder limitarlo a días concretos en vez de una meta abstracta, avisar a una
+hora fija, que perder un día programado tenga una consecuencia visible
+(puntaje) y poder ordenar la lista a mano en vez de que quede fija por
+antigüedad.
+
+```mermaid
+erDiagram
+    USERS ||--o{ HABITS : "ownerId"
+    HABITS {
+        string ownerId
+        string name
+        string subtitle "nullable"
+        string emoji
+        number_array scheduledWeekdays "Date.getDay(), 0-6, 1 a 7 valores — reemplaza a goalPerWeek"
+        boolean alertEnabled
+        string alertTime "HH:mm local, nullable"
+        number score "sube/baja, puede ser negativo"
+        number order "drag & drop"
+        string lastPenalizedDay "yyyy-mm-dd, nullable"
+        string_array doneDates "yyyy-mm-dd, arrayUnion/arrayRemove"
+        timestamp createdAt
+        timestamp updatedAt
+    }
+```
+
+**Decisiones de diseño principales** (el resto, con más detalle, en la
+sección [`habits/{habitId}`](#habitshabitid)):
+
+- El puntaje se guarda (no se deriva como la racha): tiene que sobrevivir a
+  un evento que nadie dispara — el día que se *deja pasar* sin marcar — así
+  que no hay array del que recalcularlo.
+- La alerta no tiene un `alertAt` tipo `NoteDoc`: se repite cada día
+  programado, no es un instante único, así que el job la evalúa contra la
+  hora local del dueño en cada corrida en vez de consultar un rango sobre un
+  `Timestamp`.
+- `lastPenalizedDay` es estado nuevo que no tiene equivalente en
+  `dispatch-note-alerts.ts`: sin él, "se perdió el día programado de ayer"
+  seguiría siendo cierto durante todo el día de hoy, y el job restaría
+  puntos en cada corrida del cron (cada 5-15 min) en vez de una sola vez.
+- Sin migración: los hábitos existentes no tienen los campos nuevos.
+  `getHabits` cae a `createdAt` cuando falta `order`, y a `0`/`[]`/`false`
+  para el resto — mismo criterio que ya usaba `doneDates ?? []`.
+
+**Reglas.** Sin cambios. `habits` ya era de sólo lectura por `ownerId` para
+el cliente — ningún campo nuevo lo cambia, todas las escrituras (incluida
+`reorderHabitsAction`) siguen pasando por Server Actions con Admin SDK.
+Bloque de `firestore.rules` reproducido tal cual, sin tocar:
+
+```
+    match /habits/{habitId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+```
+
+**Índices.** Ninguno nuevo. `dispatchHabitReminders` filtra `habits` por
+`alertEnabled == true` (equality, índice automático);
+`dispatchHabitPenalties` no filtra — escanea todos los `habits` porque
+`scheduledWeekdays` siempre tiene al menos un día y Firestore no puede
+consultar "array no vacío" (ver la nota de escala en
+`dispatch-habit-penalties.ts`).
 
 ### 2026-08-03 — Sistema de notificaciones: bandeja real, Web Push y una API para que cualquier módulo avise
 

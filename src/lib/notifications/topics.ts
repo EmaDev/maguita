@@ -125,6 +125,20 @@ export const NOTIFICATION_TOPICS = {
     tone: "success",
     pushByDefault: false,
   },
+  "habits.reminder": {
+    group: "habits",
+    label: "Recordatorios",
+    description: "Cuando llega la hora que elegiste para un hábito y todavía no lo marcaste.",
+    tone: "warning",
+    pushByDefault: true,
+  },
+  "habits.penalty": {
+    group: "habits",
+    label: "Días perdidos",
+    description: "Cuando se pasa un día programado sin marcar un hábito.",
+    tone: "danger",
+    pushByDefault: false,
+  },
 } as const satisfies Record<string, NotificationTopic>;
 
 export type NotificationTopicId = keyof typeof NOTIFICATION_TOPICS;

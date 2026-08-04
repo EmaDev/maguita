@@ -37,8 +37,11 @@ export function isValidTimeOfDay(value: string): boolean {
  * Hora local (`HH:mm`) de un instante en una zona IANA. Devuelve `null` si la
  * zona no existe — un `timeZone` guardado hace meses puede haber desaparecido
  * de la base de datos de husos, y en ese caso preferimos no silenciar nada.
+ *
+ * Exportada: la usan también los jobs de hábitos (`dispatch-habit-*.ts`) para
+ * comparar la hora local del dueño contra `alertTime`, mismo truco que acá.
  */
-function localTimeIn(timeZone: string, at: Date): string | null {
+export function localTimeIn(timeZone: string, at: Date): string | null {
   try {
     // `en-GB` da reloj de 24 horas con cero a la izquierda ("07:05"), que es
     // exactamente el formato en que se guardan `from`/`to` — así la comparación
@@ -48,6 +51,28 @@ function localTimeIn(timeZone: string, at: Date): string | null {
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
+    }).format(at);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Día local (`yyyy-mm-dd`) de un instante en una zona IANA. `null` si la zona
+ * no existe, mismo criterio que `localTimeIn`.
+ *
+ * La usan los jobs de hábitos para saber qué día es "hoy"/"ayer" *para el
+ * dueño del hábito*, no para el reloj del server que corre el cron.
+ */
+export function localDayIn(timeZone: string, at: Date): string | null {
+  try {
+    // `en-CA` es el locale "trampa" habitual para `yyyy-mm-dd`: es el único
+    // formato corto de `Intl` que ya sale en ese orden con guiones.
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
     }).format(at);
   } catch {
     return null;
