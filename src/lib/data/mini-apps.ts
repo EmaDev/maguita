@@ -12,7 +12,16 @@ export interface MiniApp {
   description: string;
   category: "Finanzas" | "Productividad" | "Utilidades";
   /** Nombre del ícono en components/atoms/icons */
-  icon: "wallet" | "qr" | "calculator" | "clock" | "grid" | "sparkle" | "link";
+  icon:
+    | "wallet"
+    | "qr"
+    | "calculator"
+    | "clock"
+    | "grid"
+    | "sparkle"
+    | "link"
+    | "roulette"
+    | "dumbbell";
   /** Requiere sesión para abrirse. */
   requiresAuth: boolean;
   /**
@@ -69,10 +78,11 @@ const MINI_APPS: MiniApp[] = [
   {
     id: "sorteo-expres",
     name: "Sorteo exprés",
-    description: "Elegí un ganador al azar entre una lista.",
+    description: "Sorteá uno o varios ganadores entre tus participantes.",
     category: "Utilidades",
     icon: "sparkle",
     requiresAuth: false,
+    path: ROUTES.miniAppSorteoExpres,
   },
   {
     id: "generador-qr",
@@ -91,6 +101,24 @@ const MINI_APPS: MiniApp[] = [
     icon: "link",
     requiresAuth: true,
     path: ROUTES.miniAppLinks,
+  },
+  {
+    id: "ruleta-decisiones",
+    name: "Ruleta de decisiones",
+    description: "Cargá tus opciones y dejá que la ruleta decida.",
+    category: "Utilidades",
+    icon: "roulette",
+    requiresAuth: false,
+    path: ROUTES.miniAppRuletaDecisiones,
+  },
+  {
+    id: "entrenamiento",
+    name: "Entrenamiento",
+    description: "Armá tus rutinas, marcá los días y sostené la racha.",
+    category: "Productividad",
+    icon: "dumbbell",
+    requiresAuth: true,
+    path: ROUTES.miniAppEntrenamiento,
   },
 ];
 

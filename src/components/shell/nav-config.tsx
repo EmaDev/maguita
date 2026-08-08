@@ -7,6 +7,7 @@ import {
   SparkleIcon,
 } from "@/components/atoms/icons";
 import type { HomeTab } from "@/components/organisms/home/tabs";
+import type { WorkoutTab } from "@/components/organisms/mini-apps/workout-tabs";
 import { ROUTES } from "@/lib/app-config";
 
 /** Tabs con sesión: las 4 rutas protegidas + la pública. */
@@ -40,6 +41,16 @@ export const HOME_TABS: (TabItem & { id: HomeTab })[] = [
   { id: "movimientos", label: "Movimientos" },
   { id: "notas", label: "Notas" },
   { id: "habitos", label: "Hábitos" },
+];
+
+/**
+ * Tabs de la mini-app de entrenamiento. Mismo criterio que `HOME_TABS`: el
+ * `id` está tipado con `WorkoutTab` para que esta lista y los paneles de
+ * `WorkoutTrainer` no se puedan desincronizar.
+ */
+export const WORKOUT_TABS: (TabItem & { id: WorkoutTab })[] = [
+  { id: "rutinas", label: "Rutinas" },
+  { id: "ejercicios", label: "Ejercicios" },
 ];
 
 export interface ScreenHeader {
@@ -103,6 +114,27 @@ export const SCREEN_HEADERS: Record<string, ScreenHeader> = {
   [ROUTES.miniAppCalculadoraPropinas]: { title: "Calculadora de propinas", back: true },
   [ROUTES.miniAppSplitGastos]: { title: "Split de gastos", back: true },
   [ROUTES.miniAppGeneradorQr]: { title: "Generador de QR", back: true },
+  [ROUTES.miniAppRuletaDecisiones]: {
+    title: "Ruleta de decisiones",
+    subtitle: "Que decida el azar",
+    back: true,
+  },
+  [ROUTES.miniAppSorteoExpres]: {
+    title: "Sorteo exprés",
+    subtitle: "Uno o varios ganadores",
+    back: true,
+  },
+  [ROUTES.miniAppEntrenamiento]: {
+    title: "Entrenamiento",
+    subtitle: "Rutinas y constancia",
+    back: true,
+    tabs: WORKOUT_TABS,
+    /* El buscador filtra la lista de la tab activa: rutinas en una,
+       ejercicios en la otra. La biblioteca son ~100 ejercicios, así que sin
+       buscador no se navega. */
+    searchable: true,
+    searchPlaceholder: "Buscar rutinas o ejercicios…",
+  },
   [ROUTES.miniAppLinks]: {
     title: "Links guardados",
     back: true,

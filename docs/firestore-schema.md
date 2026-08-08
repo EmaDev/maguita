@@ -23,6 +23,9 @@ una descripción). Ver también la nota en `AGENTS.md`.
 | `notes` | autogenerado | `src/lib/firebase/collections.ts` → `NoteDoc` |
 | `links` | autogenerado | `src/lib/firebase/collections.ts` → `LinkDoc` |
 | `habits` | autogenerado | `src/lib/firebase/collections.ts` → `HabitDoc` |
+| `workoutRoutines` | autogenerado | `src/lib/firebase/collections.ts` → `WorkoutRoutineDoc` |
+| `workoutSessions` | `{uid}_{yyyy-mm-dd}` | `src/lib/firebase/collections.ts` → `WorkoutSessionDoc` |
+| `customExercises` | autogenerado | `src/lib/firebase/collections.ts` → `CustomExerciseDoc` |
 | `notifications` | autogenerado, o `sha256(uid:topic:dedupeKey)` | `src/lib/firebase/collections.ts` → `NotificationDoc` |
 | `pushSubscriptions` | `sha256(endpoint)` | `src/lib/firebase/collections.ts` → `PushSubscriptionDoc` |
 | `notificationPreferences` | `uid` de Firebase Auth | `src/lib/firebase/collections.ts` → `NotificationPreferencesDoc` |
@@ -115,6 +118,37 @@ erDiagram
         timestamp createdAt
         timestamp updatedAt
     }
+    WORKOUT_ROUTINES {
+        string ownerId
+        string name "ej. Full body 3 días"
+        string type "gimnasio | crossfit | aire-libre | casa | funcional | otro"
+        string description "nullable, bajada libre y corta"
+        WorkoutDayDoc_array days "weekday (0-6, único), title y exercises (name, detail, exerciseId)"
+        boolean active "sólo una por cuenta, garantizado por transacción"
+        timestamp createdAt
+        timestamp updatedAt
+    }
+    WORKOUT_SESSIONS {
+        string ownerId
+        string date "yyyy-mm-dd, duplica lo que ya dice el id del documento"
+        string routineId "nullable, entrenamiento suelto si no hay rutina activa"
+        string routineName "nullable, copiado al registrar — no es una referencia viva"
+        string type "copiado de la rutina al registrar"
+        string title "qué se entrenó ese día"
+        string note "nullable, nota libre del día"
+        timestamp createdAt
+        timestamp updatedAt
+    }
+    CUSTOM_EXERCISES {
+        string ownerId
+        string name "ej. Remo invertido en anillas"
+        string group "MuscleGroup del catálogo estático"
+        string equipment "ExerciseEquipment del catálogo estático"
+        string description "nullable"
+        string_array tips "consejos de ejecución, hasta 8"
+        timestamp createdAt
+        timestamp updatedAt
+    }
     USERS ||--o| FAVORITES : "mismo uid, colecciones separadas a propósito"
     USERS ||--o{ PASSWORD_RESET_CODES : "por email, de un solo uso"
     USERS ||--o{ EXPENSE_CYCLES : "ownerId, sólo uno active a la vez"
@@ -155,6 +189,11 @@ erDiagram
     USERS ||--o{ NOTES : "ownerId"
     USERS ||--o{ LINKS : "ownerId"
     USERS ||--o{ HABITS : "ownerId"
+    USERS ||--o{ WORKOUT_ROUTINES : "ownerId, sólo una active a la vez"
+    USERS ||--o{ WORKOUT_SESSIONS : "ownerId, a lo sumo una por día"
+    WORKOUT_ROUTINES ||--o{ WORKOUT_SESSIONS : "routineId; name/type copiados al registrar, sin FK"
+    USERS ||--o{ CUSTOM_EXERCISES : "ownerId, ABM de la biblioteca"
+    CUSTOM_EXERCISES ||--o{ WORKOUT_ROUTINES : "days[].exercises[].exerciseId; name copiado, sin FK"
     USERS ||--o{ NOTIFICATIONS : "ownerId"
     USERS ||--o{ PUSH_SUBSCRIPTIONS : "ownerId, una por navegador"
     USERS ||--o| NOTIFICATION_PREFERENCES : "mismo uid"
@@ -599,6 +638,172 @@ Decisiones de diseño:
   individual — mueve `doneDates`/`score`/hitos de racha. `toggleHabitDayAction`
   no cambia: sigue sirviendo a los hábitos simples (`actions: []`).
 
+### `workoutRoutines/{routineId}` y `workoutSessions/{uid}_{yyyy-mm-dd}`
+
+Mini-app privada **Entrenamiento** (`/mini-apps/entrenamiento`): las rutinas
+del usuario (creadas a mano o importadas desde JSON), qué toca cada día, y el
+registro de los días efectivamente entrenados con su nota.
+
+Son dos colecciones y no un array adentro de la rutina —a diferencia de
+`habits.doneDates`— porque acá cada día entrenado **tiene contenido propio**
+(qué se hizo, la nota del día) y sobrevive a la rutina con la que se registró:
+meterlo adentro del documento de la rutina obligaría a mover el historial
+cuando el usuario cambia de plan, que es justo cuando no se quiere perder.
+
+`workoutRoutines/{routineId}` (id autogenerado, dueño por campo como
+`notes`/`habits`):
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `ownerId` | `string` | uid del dueño |
+| `name` | `string` | nombre libre, ej. "Full body 3 días". Máx. 60 caracteres |
+| `type` | `WorkoutType` | `gimnasio`/`crossfit`/`aire-libre`/`casa`/`funcional`/`otro`. Lista cerrada, registro en `src/lib/workout-model.ts` |
+| `description` | `string \| null` | bajada libre, máx. 140 caracteres |
+| `days` | `WorkoutDayDoc[]` | días de entrenamiento: `{ weekday, title, exercises }`. `weekday` es `Date.getDay()` (0=domingo…6=sábado) y es **único** dentro de la rutina; los días de descanso simplemente no tienen entrada. Ordenados arrancando el lunes. Máx. 7 |
+| `days[].exercises` | `WorkoutExerciseDoc[]` | `{ id, name, detail, exerciseId }`. `detail` es texto libre y corto ("4x10", "20 min"), `null` si no lo cargó. `exerciseId` apunta a la biblioteca (catálogo estático o `customExercises`) y es `null` si se escribió a mano. Máx. 30 por día |
+| `active` | `boolean` | rutina con la que se resuelve "qué toca hoy" y contra la que se mide la racha. **Sólo una `true` por cuenta**, garantizado por transacción |
+| `createdAt` / `updatedAt` | `Timestamp` | — |
+
+`workoutSessions/{uid}_{yyyy-mm-dd}`:
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `ownerId` | `string` | uid del dueño |
+| `date` | `string` | `yyyy-mm-dd` local del usuario. Duplica lo que ya dice el id, para poder filtrar/ordenar por campo |
+| `routineId` | `string \| null` | rutina con la que se entrenó. `null` = entrenamiento suelto (no había ninguna activa) |
+| `routineName` / `type` | `string \| null` / `WorkoutType` | **copiados** al registrar, no referenciados — igual que `category` en `expenseMovements` |
+| `title` | `string` | qué se entrenó. Lo propone el día de la rutina, pero es editable |
+| `note` | `string \| null` | nota libre del día ("me costó, bajé el peso"). Máx. 600 caracteres |
+| `createdAt` / `updatedAt` | `Timestamp` | `createdAt` no se pisa al editar la nota de un día ya registrado |
+
+Accesores: `getWorkoutRoutines` / `getWorkoutSessions`
+(`src/lib/data/workouts.ts`, sólo Server Components); `addRoutineAction`,
+`updateRoutineAction`, `activateRoutineAction`, `deleteRoutineAction`,
+`importRoutinesAction`, `addExercisesToRoutineDayAction`, `logWorkoutAction`,
+`deleteWorkoutAction` (`src/lib/data/workouts-actions.ts`, Server Actions —
+todas re-verifican la sesión y el dueño del documento). Los cálculos de racha
+y progreso son puros y viven en `src/lib/workout-model.ts`, compartidos entre
+la validación del server y la pantalla.
+
+Decisiones de diseño:
+
+- **El id de la sesión se deriva del día (`{uid}_{yyyy-mm-dd}`), no es
+  autogenerado.** Es lo que hace que marcar un día sea idempotente: un
+  `set()` pisa el registro anterior en vez de duplicarlo, así que "marcar el
+  día" y "editar la nota de un día ya marcado" son literalmente la misma
+  escritura y un doble toque no deja dos entradas del mismo día. Mismo
+  criterio que `pushSubscriptions/{sha256(endpoint)}`: cuando el documento
+  tiene una clave natural, conviene que sea el id.
+- **Una sola rutina `active`, garantizada por transacción.**
+  `activateRoutineAction` apaga las demás y prende la elegida dentro de la
+  misma `runTransaction`, igual que `startExpenseCycleAction` con los ciclos
+  de gastos: sin eso, dos toques casi simultáneos podrían dejar la cuenta con
+  dos activas y "qué toca hoy" sería ambiguo. La primera rutina que se crea
+  (o la primera del lote importado) queda activa sola.
+- **Borrar una rutina no borra su historial.** Los días entrenados guardan
+  `routineName`/`type` copiados al registrar, así que sobreviven a la baja de
+  la rutina y siguen mostrándose bien en el historial — mismo criterio que un
+  `expenseCycle` cerrado, que queda como historial. El `routineId` queda
+  apuntando a un documento que ya no existe: nadie lo dereferencia, es sólo
+  procedencia.
+- **La racha se deriva, no se guarda** (igual que en `habits`), pero **no
+  cuenta días corridos**: `workoutStreak` saltea los días de descanso de la
+  rutina activa, así que cumplir un plan de lunes/miércoles/viernes tres
+  semanas seguidas es una racha de 9 aunque no se entrene los sábados. Un día
+  entrenado fuera del plan no suma (mide cumplimiento, no actividad), y si hoy
+  toca y todavía no se marcó, la racha se cuenta hasta el día de entrenamiento
+  anterior — el día no terminó. Sin rutina activa cae a la racha por días
+  corridos, que es lo único medible sin un plan.
+- **La racha se recalcula contra la rutina *activa de ahora*.** Cambiar de
+  plan reinterpreta el historial (los días que antes eran de descanso pueden
+  pasar a ser exigidos). Es el precio de no congelar el plan en cada sesión;
+  a cambio, corregir un error en la rutina no deja el historial inconsistente.
+- **El día lo manda el cliente y el server sólo valida su forma**, misma
+  `assertValidDay` que `habits-actions.ts` y por el mismo motivo: el día
+  entrenado es el día *local del usuario* y el server no conoce su huso. El
+  calendario de "Registrar otro día" no deja elegir fechas futuras, pero eso
+  es UI: el peor caso de saltearlo es que alguien se infle su propia racha.
+- **La importación es todo o nada.** `importRoutinesAction` parsea y valida
+  todas las rutinas del JSON antes de escribir, y escribe en un `WriteBatch`:
+  importar la mitad de un plan y dejar al usuario adivinando cuáles entraron
+  sería peor que rechazarlo entero. El parser es deliberadamente tolerante con
+  la *forma* (el día como número o como nombre, los ejercicios como objetos o
+  como strings sueltos, `detail`/`reps`/`sets`) pero estricto con lo que
+  guarda: todo pasa por la misma `normalizeRoutine` que el alta manual, así
+  que un JSON no puede meter un tipo inexistente ni saltearse los topes.
+- **Sin `orderBy` en las consultas.** Las dos colecciones filtran sólo por
+  `ownerId` (`==`) y ordenan en memoria — mismo criterio que
+  `getNotes`/`getLinks`/`getHabits`, evita un índice compuesto. Las day keys
+  `yyyy-mm-dd` son lexicográficas, así que ordenarlas como strings ya es
+  ordenarlas cronológicamente. El historial se trae completo (no una ventana
+  de fechas) porque la grilla de constancia y el récord histórico lo
+  necesitan entero; son ~150 documentos por año de entrenamiento, el mismo
+  orden de magnitud que las notas.
+
+### `customExercises/{exerciseId}`
+
+Ejercicios propios del usuario: el ABM de la tab **Ejercicios** de la mini-app
+de entrenamiento. Id autogenerado, dueño por campo, mismo criterio que el
+resto.
+
+**El catálogo base no está acá.** Los ~90 ejercicios con descripción y
+consejos viven en `src/lib/exercise-catalog.ts`, un módulo estático. Esta
+colección guarda **sólo** lo que el usuario agrega, y las dos listas se
+mezclan en memoria con `mergeExercises` al mostrarlas.
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `ownerId` | `string` | uid del dueño |
+| `name` | `string` | nombre libre, máx. 60 caracteres |
+| `group` | `string` | `MuscleGroup` del catálogo (`pecho`, `espalda`, `hombros`, `brazos`, `piernas`, `gluteos`, `core`, `cardio`, `full-body`, `movilidad`) |
+| `equipment` | `string` | `ExerciseEquipment` del catálogo (`barra`, `mancuernas`, `maquina`, `polea`, `kettlebell`, `banda`, `peso-corporal`, `otro`) |
+| `description` | `string \| null` | qué es y para qué sirve. Máx. 400 caracteres |
+| `tips` | `string[]` | consejos de ejecución. Hasta 8, de 200 caracteres cada uno. `[]` = no cargó ninguno |
+| `createdAt` / `updatedAt` | `Timestamp` | — |
+
+Accesores: `getCustomExercises` (`src/lib/data/exercises.ts`, sólo Server
+Components), `addCustomExerciseAction` / `updateCustomExerciseAction` /
+`deleteCustomExerciseAction` (`src/lib/data/exercises-actions.ts`).
+
+Decisiones de diseño:
+
+- **El catálogo base es un módulo estático, no documentos de Firestore.** Es
+  el mismo para todas las cuentas y sólo cambia si se edita el archivo, así
+  que meterlo en la base costaría ~90 documentos por usuario (o una colección
+  global con su propia regla de lectura) y una lectura en cada carga de la
+  pantalla, para devolver siempre exactamente lo mismo. Es la misma lógica que
+  `DEFAULT_EXPENSE_CATEGORIES`, con una diferencia: allá el set fijo es un
+  punto de partida que el ABM después copia y edita; acá el catálogo **no es
+  editable** y lo propio del usuario vive aparte, así que las dos listas
+  nunca se pisan y actualizar el catálogo en un deploy mejora la app para
+  todos sin migrar nada.
+- **`group`/`equipment` se guardan como `string`, no como el union de
+  TypeScript.** El documento no puede depender de un tipo del código: si
+  mañana se saca un grupo del registro, los documentos viejos seguirían
+  teniéndolo. `getCustomExercises` valida al leer (`isMuscleGroup`/
+  `isEquipment`) y cae al default en vez de romper el filtro de la
+  biblioteca.
+- **La rutina copia el `name` y guarda el `exerciseId` sólo como
+  procedencia.** Igual que `category` en `expenseMovements`: renombrar un
+  ejercicio propio no reescribe las rutinas que ya lo usaban, y borrarlo
+  tampoco las rompe — quedan con el nombre copiado y un `exerciseId` que ya no
+  resuelve, así que dejan de ofrecer la ficha pero el plan sigue completo. La
+  descripción y los consejos sí se ven siempre actualizados, porque ésos se
+  resuelven por id en cada render en vez de copiarse.
+- **`exerciseId` no se valida contra la biblioteca al escribir.**
+  `normalizeExercises` lo guarda tal cual llega. Verificarlo costaría una
+  lectura por ejercicio en cada guardado de rutina para prevenir un caso cuyo
+  peor efecto es que una fila no muestre ficha — el mismo estado en el que
+  quedan, legítimamente, las filas escritas a mano.
+- **Al importar un JSON, el `exerciseId` se resuelve por nombre.** Un JSON
+  externo no trae ids de nuestra biblioteca, así que `matchCatalogByName`
+  compara contra el catálogo ignorando mayúsculas y acentos: si el nombre
+  coincide, la fila importada queda enganchada a su ficha. Sin match se
+  guarda igual con `exerciseId: null` — no rechaza la importación por no
+  reconocer un nombre.
+- **Tope de 200 ejercicios propios.** La biblioteca los baja todos juntos en
+  cada carga (no hay paginado), mismo criterio que el tope de 50 hábitos.
+
 ### `notifications/{notificationId}`, `pushSubscriptions/{hash}` y `notificationPreferences/{uid}`
 
 Sistema de notificaciones: la bandeja que alimenta la campana del shell, las
@@ -838,6 +1043,21 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /workoutRoutines/{routineId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /workoutSessions/{sessionId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /customExercises/{exerciseId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
     match /notifications/{notificationId} {
       allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
       allow write: if false;
@@ -871,6 +1091,171 @@ documento entero, campos nuevos incluidos — Firestore no tiene reglas a
 nivel de campo para lectura.
 
 ## Changelog
+
+### 2026-08-08 — Entrenamiento: biblioteca de ejercicios y ABM propio
+
+**Qué cambió.** La mini-app de entrenamiento pasó a tener dos tabs
+(`WORKOUT_TABS` en `nav-config`, leídas con `useShellTabs()` igual que las de
+Inicio): **Rutinas** (lo que ya había) y **Ejercicios**, una biblioteca
+consultable con la ficha de cada movimiento — qué es, para qué sirve y los
+consejos de ejecución.
+
+- **Catálogo base estático**: `src/lib/exercise-catalog.ts`, ~90 ejercicios
+  con `group`, `equipment`, `description` y `tips`, repartidos en 10 grupos
+  musculares. **No es una colección de Firestore** (ver la decisión de diseño
+  en la sección de `customExercises`).
+- **Colección nueva `customExercises/{exerciseId}`** — `CustomExerciseDoc`:
+  los ejercicios que el usuario agrega con el ABM. Misma forma que una
+  entrada del catálogo, para poder mezclarlos en una sola lista
+  (`mergeExercises`).
+- **`WorkoutExerciseDoc` sumó `exerciseId: string | null`**: de qué ejercicio
+  de la biblioteca salió esa fila de la rutina. Es lo que permite abrir la
+  ficha desde el plan. `null` en las filas escritas a mano y en todas las
+  cargadas antes de este cambio (`getWorkoutRoutines` lo resuelve con `??`,
+  sin migración).
+- **Server Action nueva `addExercisesToRoutineDayAction(routineId, weekday,
+  exercises)`** en `workouts-actions.ts`: el camino "de la lista a la
+  rutina". Desde la biblioteca se seleccionan varios ejercicios, se elige a
+  qué rutina y a qué día van, y se agregan al final de ese día. El mismo
+  selector (`ExercisePickerSheet`) se reusa dentro del composer de rutinas,
+  donde no toca Firestore: ahí sólo agrega filas al borrador.
+
+**Por qué el catálogo no va en Firestore.** Es idéntico para todas las
+cuentas y sólo cambia con un deploy. Guardarlo en la base sería ~90
+documentos por usuario (o una colección global con su propia regla) y una
+lectura extra en cada carga, siempre para devolver lo mismo. Como además no
+es editable —a diferencia de `DEFAULT_EXPENSE_CATEGORIES`, que es un punto de
+partida que el ABM copia—, lo propio del usuario puede vivir aparte sin que
+las dos listas se pisen nunca, y mejorar una descripción llega a todos sin
+migrar datos.
+
+**Por qué la rutina copia el nombre pero guarda el id.** Mismo criterio que
+`category` en `expenseMovements`, con un matiz: el `name` copiado hace que
+renombrar o borrar un ejercicio propio no reescriba ni rompa las rutinas ya
+armadas, mientras que la descripción y los consejos se resuelven por
+`exerciseId` en cada render, así que sí se ven siempre actualizados. Un id
+que dejó de resolver degrada la fila a "sin ficha", que es el mismo estado en
+el que están, legítimamente, las filas escritas a mano.
+
+```mermaid
+flowchart LR
+    CAT["exercise-catalog.ts<br/>(estático, ~90)"] --> MERGE["mergeExercises()"]
+    CE[("customExercises<br/>{exerciseId}")] --> MERGE
+    MERGE --> LIB["Tab Ejercicios<br/>ficha + ABM + selección"]
+    MERGE --> PICK["ExercisePickerSheet<br/>(dentro del composer)"]
+    LIB -->|addExercisesToRoutineDayAction| WR[("workoutRoutines<br/>days[].exercises[]")]
+    PICK -->|borrador, sin escribir| WR
+    WR -->|exerciseId| MERGE
+```
+
+**Reglas de Firestore.** Un bloque nuevo, mismo criterio por campo que el
+resto. El catálogo estático no necesita ninguno: no vive en Firestore.
+
+```
+    match /customExercises/{exerciseId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+```
+
+**Sin índices nuevos.** `getCustomExercises` filtra sólo por `ownerId` (`==`)
+y ordena en memoria, igual que el resto.
+
+**Fuera de alcance de esta entrada.** El catálogo no tiene imágenes ni videos
+(sólo texto), no hay registro de cargas por ejercicio (el peso sigue siendo
+texto libre en `detail`), y los ejercicios propios no se pueden compartir
+entre cuentas — el export de una rutina lleva los nombres, no las fichas.
+
+### 2026-08-06 — Mini-app Entrenamiento: rutinas y días entrenados
+
+**Qué cambió.** Dos colecciones nuevas para la mini-app privada
+**Entrenamiento** (`/mini-apps/entrenamiento`, `requiresAuth: true`):
+
+- `workoutRoutines/{routineId}` (id autogenerado) — `WorkoutRoutineDoc`: la
+  rutina con su `type` (gimnasio/crossfit/aire-libre/casa/funcional/otro),
+  sus `days` (un `weekday` único por día, con `title` y `exercises`) y el flag
+  `active`, del que sólo puede haber uno prendido por cuenta.
+- `workoutSessions/{uid}_{yyyy-mm-dd}` — `WorkoutSessionDoc`: un día
+  efectivamente entrenado, con qué se hizo y la nota del día. **El id no es
+  autogenerado**: se deriva del día, lo que hace que marcarlo sea idempotente
+  y que editar la nota sea la misma escritura que crearlo.
+
+Módulos nuevos: `src/lib/data/workouts.ts` (lectura),
+`src/lib/data/workouts-actions.ts` (Server Actions, incluida la importación
+desde JSON) y `src/lib/workout-model.ts` (racha, récord y progreso semanal —
+funciones puras compartidas entre server y cliente, como `home-model.ts`).
+`ROUTES.miniAppEntrenamiento` se sumó a `PROTECTED_ROUTES`, y el módulo
+soporta PinLock con el id `"entrenamiento"` (el mismo `MiniApp.id`).
+
+**Por qué dos colecciones y no un array en la rutina.** `habits` guarda su
+historial como un `string[]` adentro del propio documento, y para un hábito
+alcanza: un día cumplido es un booleano. Acá un día entrenado tiene contenido
+propio (qué se hizo, la nota) y tiene que sobrevivir a la rutina con la que se
+registró — el usuario cambia de plan cada varios meses y no puede perder el
+historial al hacerlo. Por eso `workoutSessions` es su propia colección, con
+`routineName`/`type` copiados al registrar en vez de una referencia viva
+(mismo criterio que `category` en `expenseMovements`): borrar la rutina no
+rompe ni reescribe lo ya registrado.
+
+**Por qué la racha no cuenta días corridos.** `workoutStreak` saltea los días
+de descanso de la rutina activa en vez de cortarse con ellos: un plan de
+lunes/miércoles/viernes cumplido tres semanas seguidas es una racha de 9, no
+una racha rota cada sábado. Un día entrenado fuera del plan no suma — mide
+cumplimiento del plan, no actividad, mismo criterio que
+`scheduledWeekCountOf` en los hábitos. Se deriva de las sesiones en cada
+render, no se guarda.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser (WorkoutTrainer)
+    participant SA as Server Action
+    participant FS as Firestore
+
+    B->>SA: importRoutinesAction(json)
+    SA->>SA: parse + normalize de TODAS las rutinas
+    alt alguna no valida
+        SA-->>B: throw (no se guarda ninguna)
+    else válidas
+        SA->>FS: WriteBatch set workoutRoutines/{auto} x N
+        SA-->>B: cantidad importada
+    end
+
+    B->>SA: activateRoutineAction(routineId)
+    SA->>FS: runTransaction — apaga las otras, prende ésta
+    SA-->>B: revalidatePath(/mini-apps/entrenamiento)
+
+    B->>SA: logWorkoutAction({date, title, note, routineId})
+    SA->>FS: get workoutRoutines/{routineId} (valida dueño)
+    SA->>FS: set workoutSessions/{uid}_{date} (pisa si ya existía)
+    SA-->>B: revalidatePath(/mini-apps/entrenamiento)
+```
+
+**Reglas de Firestore.** Hay que agregar dos bloques a `firestore.rules` (ya
+escritos en el repo, mismo criterio de dueño por campo que
+`notes`/`links`/`habits`: el cliente lee lo suyo, todas las escrituras pasan
+por Server Actions con el Admin SDK). En `workoutSessions` el dueño se valida
+por `ownerId` y **no** parseando el prefijo del id: la regla no depende de
+cómo se arme la clave.
+
+```
+    match /workoutRoutines/{routineId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /workoutSessions/{sessionId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+```
+
+**Sin índices nuevos.** Las dos consultas filtran sólo por `ownerId` (`==`) y
+ordenan en memoria, así que no hace falta tocar `firestore.indexes.json`.
+
+**Fuera de alcance de esta entrada.** No hay recordatorios ni notificaciones
+de entrenamiento (los `topics` no se tocaron), no hay progresión de cargas por
+ejercicio (el peso va como texto libre en `detail`), y la racha no genera
+avisos de hito como la de los hábitos.
 
 ### 2026-08-04 — Links guardados: descripción y categoría propias del usuario
 

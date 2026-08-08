@@ -47,6 +47,16 @@ export const COLLECTIONS = {
   links: "links",
   /** Hábitos de la tab Hábitos. Id autogenerado: muchos por usuario. */
   habits: "habits",
+  /** Rutinas de la mini-app de entrenamiento. Id autogenerado: varias por usuario, una sola `active`. */
+  workoutRoutines: "workoutRoutines",
+  /** Días entrenados de la mini-app de entrenamiento. Id = `{uid}_{yyyy-mm-dd}`: uno por día. */
+  workoutSessions: "workoutSessions",
+  /**
+   * Ejercicios propios del usuario, los que suma con el ABM de la biblioteca.
+   * Id autogenerado. El catálogo base **no** vive acá: es estático, en
+   * `src/lib/exercise-catalog.ts` (ver la nota de diseño de ese módulo).
+   */
+  customExercises: "customExercises",
   /**
    * Bandeja de notificaciones que alimenta la campana del shell. Id
    * autogenerado, salvo cuando la emisión trae `dedupeKey` (ver `notify()`).
@@ -276,6 +286,106 @@ export interface HabitActionDoc {
 }
 
 /**
+ * Tipo de entrenamiento de una rutina. Lista cerrada: el registro con su
+ * etiqueta y emoji vive en `src/lib/workout-model.ts`, que es puro y lo
+ * comparten la validación del server y los chips del composer.
+ */
+export type WorkoutType = "gimnasio" | "crossfit" | "aire-libre" | "casa" | "funcional" | "otro";
+
+export interface WorkoutExerciseDoc {
+  /** Generado en el cliente (`crypto.randomUUID()`), estable entre ediciones. Es la fila de la rutina, no el ejercicio de la biblioteca. */
+  id: string;
+  /** Nombre del ejercicio, ej. "Banco plano". Se **copia** de la biblioteca al elegirlo, no se referencia. */
+  name: string;
+  /** Series/repeticiones/tiempo como texto libre y corto, ej. "4x10" o "20 min". `null` = sin detalle. */
+  detail: string | null;
+  /**
+   * Ejercicio de la biblioteca del que salió esta fila: un id del catálogo
+   * estático (`src/lib/exercise-catalog.ts`) o el id de un
+   * `customExercises/{id}`. Es lo que permite mostrar descripción y consejos
+   * desde la rutina. `null` = se escribió a mano, sin pasar por la
+   * biblioteca; también es lo que traen las filas cargadas antes de que la
+   * biblioteca existiera.
+   */
+  exerciseId: string | null;
+}
+
+/**
+ * Un ejercicio propio del usuario (ABM de la biblioteca). Misma forma que
+ * `ExerciseInfo` del catálogo estático menos el `id`, que acá es el id del
+ * documento — así los dos se pueden mezclar en una sola lista.
+ */
+export interface CustomExerciseDoc {
+  ownerId: string;
+  name: string;
+  /** `MuscleGroup` de `src/lib/exercise-catalog.ts`. */
+  group: string;
+  /** `ExerciseEquipment` de `src/lib/exercise-catalog.ts`. */
+  equipment: string;
+  description: string | null;
+  /** Consejos de ejecución, uno por línea en el formulario. `[]` = no cargó ninguno. */
+  tips: string[];
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+/**
+ * Un día de entrenamiento de la rutina: qué toca ese día de la semana.
+ * `weekday` sigue la convención `Date.getDay()` (0 = domingo … 6 = sábado),
+ * la misma que `HabitDoc.scheduledWeekdays`, y es único dentro de la rutina —
+ * los días de descanso simplemente no tienen entrada acá.
+ */
+export interface WorkoutDayDoc {
+  weekday: number;
+  /** Qué se entrena ese día, ej. "Pecho y tríceps". */
+  title: string;
+  exercises: WorkoutExerciseDoc[];
+}
+
+export interface WorkoutRoutineDoc {
+  ownerId: string;
+  /** Nombre libre, ej. "Full body 3 días". */
+  name: string;
+  type: WorkoutType;
+  /** Bajada libre y corta. `null` = sin descripción. */
+  description: string | null;
+  /** Días de entrenamiento, ordenados por `weekday` arrancando el lunes. */
+  days: WorkoutDayDoc[];
+  /**
+   * Rutina que la pantalla usa para resolver "qué toca hoy" y contra la que se
+   * mide la racha. Sólo una `active` por cuenta a la vez, garantizado por
+   * transacción en `activateRoutineAction` — mismo criterio que el `status`
+   * de `expenseCycles`.
+   */
+  active: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+/**
+ * Un día efectivamente entrenado. El id del documento es `{uid}_{yyyy-mm-dd}`,
+ * no autogenerado: hace que marcar el día sea idempotente (un `set()` pisa el
+ * registro anterior en vez de duplicarlo) y que no haga falta una consulta
+ * previa para editar la nota de un día ya marcado.
+ */
+export interface WorkoutSessionDoc {
+  ownerId: string;
+  /** Día entrenado, `yyyy-mm-dd` local del usuario. Duplica lo que ya dice el id, para poder filtrar/ordenar por campo. */
+  date: string;
+  /** Rutina con la que se entrenó. `null` = entrenamiento suelto, sin rutina activa al registrarlo. */
+  routineId: string | null;
+  /** Nombre y tipo de la rutina **copiados** al registrar, como `category` en `expenseMovements`: el historial no se reescribe si después se renombra o borra la rutina. */
+  routineName: string | null;
+  type: WorkoutType;
+  /** Qué se entrenó ese día: el título del día de la rutina, o lo que el usuario escriba. */
+  title: string;
+  /** Nota libre del día ("me costó, bajé el peso"). `null` = no dejó ninguna. */
+  note: string | null;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+/**
  * Una entrada de la bandeja de notificaciones. La escribe siempre `notify()`
  * (`src/lib/notifications/notify.ts`), nunca un módulo a mano: es lo que
  * garantiza que el mismo evento salga por el panel y por push con el mismo
@@ -354,6 +464,9 @@ export interface CollectionTypes {
   [COLLECTIONS.notes]: NoteDoc;
   [COLLECTIONS.links]: LinkDoc;
   [COLLECTIONS.habits]: HabitDoc;
+  [COLLECTIONS.workoutRoutines]: WorkoutRoutineDoc;
+  [COLLECTIONS.workoutSessions]: WorkoutSessionDoc;
+  [COLLECTIONS.customExercises]: CustomExerciseDoc;
   [COLLECTIONS.notifications]: NotificationDoc;
   [COLLECTIONS.pushSubscriptions]: PushSubscriptionDoc;
   [COLLECTIONS.notificationPreferences]: NotificationPreferencesDoc;

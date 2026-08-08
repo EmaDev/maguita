@@ -79,6 +79,31 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Rutinas de la mini-app de entrenamiento. Id autogenerado, mismo
+    // criterio por campo que habits/links: los días y ejercicios viven en
+    // arrays adentro del mismo documento, así que no necesitan match aparte.
+    match /workoutRoutines/{routineId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    /* Días entrenados. El id es `{uid}_{yyyy-mm-dd}`, pero el dueño se valida
+       igual por campo (`ownerId`) y no parseando el id: la regla no depende
+       de cómo se arme la clave, y es el mismo criterio que el resto. */
+    match /workoutSessions/{sessionId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    /* Ejercicios propios del ABM de la biblioteca de entrenamiento. Id
+       autogenerado, mismo criterio por campo. El catálogo base de ejercicios
+       no tiene match porque no vive en Firestore: es estático, en
+       `src/lib/exercise-catalog.ts`. */
+    match /customExercises/{exerciseId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
     // Bandeja de notificaciones. Id autogenerado (o derivado de la dedupeKey),
     // mismo criterio por campo que notes/habits.
     match /notifications/{notificationId} {

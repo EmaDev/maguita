@@ -174,6 +174,15 @@ export const WalletIcon = (p: IconProps) => (
   </Icon>
 );
 
+/** Rueda con rayos: la ruleta de decisiones. El punto del centro va relleno. */
+export const RouletteIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 3.5v17M3.5 12h17M6 6l12 12M18 6 6 18" />
+    <circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none" />
+  </Icon>
+);
+
 export const CalculatorIcon = (p: IconProps) => (
   <Icon {...p}>
     <rect x="5" y="3" width="14" height="18" rx="3" />
@@ -330,6 +339,13 @@ export const ExternalLinkIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M9 5.5H5.5a1.5 1.5 0 0 0-1.5 1.5v11.5A1.5 1.5 0 0 0 5.5 20H17a1.5 1.5 0 0 0 1.5-1.5V15" />
     <path d="M13 4.5h6v6M18.5 5 11 12.5" />
+  </Icon>
+);
+
+export const DumbbellIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 9.5v5M7 7.5v9M17 7.5v9M20 9.5v5" />
+    <path d="M7 12h10" />
   </Icon>
 );
 

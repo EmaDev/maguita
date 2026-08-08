@@ -20,6 +20,9 @@ export const ROUTES = {
   miniAppGeneradorQr: "/mini-apps/generador-qr",
   miniAppGeneradorQrTexto: "/mini-apps/generador-qr/texto",
   miniAppLinks: "/mini-apps/links",
+  miniAppRuletaDecisiones: "/mini-apps/ruleta-decisiones",
+  miniAppSorteoExpres: "/mini-apps/sorteo-expres",
+  miniAppEntrenamiento: "/mini-apps/entrenamiento",
   /** Herramientas de desarrollo. Sólo existe con `DEV_TOOLS=true` (ver `lib/dev-tools.ts`). */
   debug: "/debug",
   login: "/login",
@@ -35,6 +38,7 @@ export const PROTECTED_ROUTES = [
   ROUTES.ajustes,
   ROUTES.miniAppSplitGastos,
   ROUTES.miniAppLinks,
+  ROUTES.miniAppEntrenamiento,
   ROUTES.debug,
 ] as const;
 

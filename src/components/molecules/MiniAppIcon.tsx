@@ -1,9 +1,11 @@
 import {
   CalculatorIcon,
   ClockIcon,
+  DumbbellIcon,
   GridIcon,
   LinkIcon,
   QrIcon,
+  RouletteIcon,
   SparkleIcon,
   WalletIcon,
 } from "@/components/atoms/icons";
@@ -21,6 +23,8 @@ const ICONS = {
   grid: GridIcon,
   sparkle: SparkleIcon,
   link: LinkIcon,
+  roulette: RouletteIcon,
+  dumbbell: DumbbellIcon,
 } satisfies Record<MiniApp["icon"], unknown>;
 
 export function MiniAppIcon({
