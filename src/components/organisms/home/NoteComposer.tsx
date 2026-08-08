@@ -66,9 +66,15 @@ interface NoteComposerProps {
    * usuario en Notas sin ninguna señal de dónde escribir.
    */
   focusSignal?: number;
+  /**
+   * Acción extra en el header del acordeón (el botón de ajustes de la tab).
+   * Vive acá y no en una fila propia arriba del composer: esa fila quedaba
+   * vacía salvo por el ícono, dejando un espacio muerto sobre la card.
+   */
+  headerAction?: ReactNode;
 }
 
-export function NoteComposer({ today, focusSignal }: NoteComposerProps) {
+export function NoteComposer({ today, focusSignal, headerAction }: NoteComposerProps) {
   const { snack } = useSnackbar();
   const [pending, startTransition] = useTransition();
   const textRef = useRef<HTMLTextAreaElement>(null);
@@ -178,21 +184,24 @@ export function NoteComposer({ today, focusSignal }: NoteComposerProps) {
 
   return (
     <div className="rounded-2xl border border-border bg-surface">
-      <button
-        type="button"
-        onClick={() => toggleOpen(!open)}
-        aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
-      >
-        <span className="text-sm font-medium text-foreground">Nueva nota</span>
-        <motion.span
-          animate={{ rotate: open ? 180 : 0 }}
-          transition={{ duration: 0.18 }}
-          className="text-muted"
+      <div className="flex w-full items-center justify-between gap-2 px-4 py-2">
+        <button
+          type="button"
+          onClick={() => toggleOpen(!open)}
+          aria-expanded={open}
+          className="flex flex-1 items-center justify-between gap-2 py-1 text-left"
         >
-          <ChevronDownIcon className="h-4 w-4" />
-        </motion.span>
-      </button>
+          <span className="text-sm font-medium text-foreground">Nueva nota</span>
+          <motion.span
+            animate={{ rotate: open ? 180 : 0 }}
+            transition={{ duration: 0.18 }}
+            className="text-muted"
+          >
+            <ChevronDownIcon className="h-4 w-4" />
+          </motion.span>
+        </button>
+        {headerAction}
+      </div>
 
       <AnimatePresence initial={false}>
         {open && (

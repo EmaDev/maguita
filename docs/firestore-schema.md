@@ -1092,6 +1092,159 @@ nivel de campo para lectura.
 
 ## Changelog
 
+### 2026-08-08 — Ajustes: borrar los datos de un módulo/mini-app puntual
+
+**Qué cambió.** Nueva sección "Borrar datos" en Ajustes
+(`ModuleResetCard`, `src/components/organisms/settings/ModuleResetCard.tsx`)
+que deja borrar de una todos los datos de un módulo o mini-app elegido —no la
+cuenta entera—, "restableciéndolo" a como estaba antes de usarlo. No agrega
+colecciones ni cambia la forma de ningún documento: es puro borrado sobre lo
+que ya existe.
+
+- **Registro de módulos resettable**: `src/lib/data/module-reset.ts`
+  (`RESETTABLE_MODULES`) mapea cada módulo a sus colecciones. Usa los mismos
+  ids que ya existían para otro propósito —`MiniApp.id`
+  (`lib/data/mini-apps.ts`) para mini-apps, `HomeTab`
+  (`home/tabs.ts`) para las tabs de Inicio— en vez de inventar uno nuevo, el
+  mismo criterio que ya usa `UserPreferences.lockedModules` de PinLock:
+
+  | Módulo (`id`) | `kind` | Colecciones |
+  |---|---|---|
+  | `movimientos` (`HomeTab`, no `MiniApp`) | `home-tab` | `expenseCycles`, `expenseMovements`, `expenseCategories` |
+  | `notas` | `home-tab` | `notes` |
+  | `habitos` | `home-tab` | `habits` |
+  | `links-guardados` | `mini-app` | `links` |
+  | `entrenamiento` | `mini-app` | `workoutRoutines`, `workoutSessions`, `customExercises` |
+
+  El gestor de gastos usa el id de la tab **Movimientos** de Inicio y no
+  `split-gastos`: esa mini-app del catálogo es un placeholder sin
+  persistencia (`SplitGastos.tsx`, *"Sin persistencia todavía"*) — hoy
+  `expenseCycles`/`expenseMovements`/`expenseCategories` sólo los lee/escribe
+  `MovementsPanel` vía `getHomeData`/`expenses-actions.ts`, así que ofrecer
+  borrar "Split de gastos" habría borrado datos que esa pantalla ni siquiera
+  muestra.
+- **Dos tabs en la UI, no una sola lista.** `ModuleResetCard` separa
+  "Módulos" (`kind: "home-tab"`: Movimientos, Notas, Hábitos) de "Mini-apps"
+  (`kind: "mini-app"`: Links guardados, Entrenamiento) con el componente
+  `Tabs` de `lib-kit-components` (`variant="segmented"`, con `panels` para el
+  crossfade) — son dos catálogos distintos para quien usa la app (uno son las
+  tabs de Inicio, el otro el grid de `/mini-apps`), aunque ambos se borran
+  igual del lado del server. Si sólo uno de los dos grupos tiene datos, se
+  muestra esa lista sola, sin la barra de tabs (no tiene sentido un
+  selector con una sola opción).
+
+  Sólo se listan los módulos con backend real y datos propios del usuario —el
+  resto del catálogo de mini-apps (`cobrar-qr`, `calculadora-propinas`,
+  `recordatorio-pagos`, `panel-accesos`, `generador-qr`,
+  `ruleta-decisiones`, `sorteo-expres`) son utilidades sin persistencia o
+  todavía sin pantalla, así que no tienen nada que ofrecer borrar.
+- **"Sólo si tiene datos"**: `getModulesWithData(uid)` (mismo archivo, sólo
+  Server Components) consulta cada colección del módulo con `limit(1)` —o,
+  para `expenseCategories` (doc id = uid, sin campo `ownerId`), un `get()`
+  directo del documento— y sólo devuelve los módulos con al menos un
+  resultado. `AjustesPage` (`src/app/(app)/ajustes/page.tsx`) la llama junto
+  con `getProfile` y le pasa la lista a `SettingsPanel`, que no renderiza
+  la sección si viene vacía.
+- **El borrado real es `resetModuleDataAction`**
+  (`src/lib/data/module-reset-actions.ts`, Server Action): por cada colección
+  del módulo, borra por `ownerId` en tandas de hasta 500 documentos por
+  `WriteBatch` (repite hasta vaciar la colección para ese usuario — un módulo
+  puede superar el tope de un solo batch, ej. años de `workoutSessions`), o
+  borra directo el documento cuando el id ya es el `uid`
+  (`expenseCategories`). Pide `requireFreshSession` en vez de `requireSession`
+  —mismo criterio que "borrar la cuenta" en `dal.ts`— porque es irreversible
+  y de alcance amplio, a diferencia del resto de los borrados del repo
+  (`deleteNoteAction`, `clearNotificationsAction`, etc.) que sólo revalidan la
+  sesión de la cookie.
+- **La UI pide confirmación explícita**: `ModuleResetCard` es un componente
+  cliente que muestra un `Modal` de `lib-kit-components` con "Cancelar"/
+  "Borrar datos" antes de llamar a la Server Action —ningún borrado del
+  repo hasta ahora tenía un paso de confirmación con `Modal`, el precedente
+  más cercano (`NoteDetailModal`) usa un `mode: "confirm"` inline en vez de un
+  modal aparte; acá se usa `Modal` porque es Ajustes, no el detalle de un
+  ítem puntual.
+
+- **`firestore.rules` no necesita ningún cambio.** Las cinco colecciones
+  tocadas (`expenseCycles`, `expenseMovements`, `expenseCategories`, `links`,
+  `workoutRoutines`, `workoutSessions`, `customExercises`, `notes`, `habits`)
+  ya tienen `allow write: if false` — todo el borrado lo hace el Admin SDK
+  desde `resetModuleDataAction`, que saltea las reglas igual que el resto de
+  las Server Actions del repo. Los bloques vigentes (sin cambios) son:
+  ```
+  match /expenseCycles/{cycleId} {
+    allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    allow write: if false;
+  }
+
+  match /expenseMovements/{movementId} {
+    allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    allow write: if false;
+  }
+
+  match /expenseCategories/{uid} {
+    allow read: if isOwner(uid);
+    allow write: if false;
+  }
+
+  match /links/{linkId} {
+    allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    allow write: if false;
+  }
+
+  match /workoutRoutines/{routineId} {
+    allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    allow write: if false;
+  }
+
+  match /workoutSessions/{sessionId} {
+    allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    allow write: if false;
+  }
+
+  match /customExercises/{exerciseId} {
+    allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    allow write: if false;
+  }
+
+  match /notes/{noteId} {
+    allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    allow write: if false;
+  }
+
+  match /habits/{habitId} {
+    allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    allow write: if false;
+  }
+  ```
+
+```mermaid
+sequenceDiagram
+    participant B as Browser (ModuleResetCard)
+    participant SA as resetModuleDataAction
+    participant AD as Admin SDK
+    participant FS as Firestore
+
+    B->>SA: resetModuleDataAction("entrenamiento")
+    SA->>SA: requireFreshSession()
+    SA->>SA: findResettableModule("entrenamiento")
+    loop por cada colección del módulo
+        SA->>AD: query where ownerId == uid, limit 500
+        AD->>FS: get()
+        FS-->>AD: docs
+        AD->>FS: batch.delete() por cada doc
+        Note over SA,FS: repite mientras la tanda venga llena (500)
+    end
+    SA-->>B: revalidatePath(/ajustes, /inicio)
+```
+
+- **Fuera de alcance a propósito**: no hay una opción de "borrar todo" que
+  junte todos los módulos en un solo click —el pedido fue módulo por
+  módulo—, ni borrado de `favorites`/`notificationPreferences`/
+  `pushSubscriptions` (no son "datos de un módulo", son configuración
+  transversal ya cubierta por otras pantallas de Ajustes). Tampoco borra la
+  cuenta de Firebase Auth ni el documento `users/{uid}`: eso sería "borrar la
+  cuenta", una acción distinta que no se pidió acá.
+
 ### 2026-08-08 — Entrenamiento: biblioteca de ejercicios y ABM propio
 
 **Qué cambió.** La mini-app de entrenamiento pasó a tener dos tabs

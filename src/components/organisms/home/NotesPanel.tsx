@@ -186,13 +186,15 @@ export function NotesPanel({ today, notes, focusSignal, pinSet, locked }: NotesP
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button size="icon" variant="ghost" aria-label="Ajustes" onClick={openSettingsSheet}>
-          <SettingsIcon />
-        </Button>
-      </div>
-
-      <NoteComposer today={today} focusSignal={focusSignal} />
+      <NoteComposer
+        today={today}
+        focusSignal={focusSignal}
+        headerAction={
+          <Button size="icon" variant="ghost" aria-label="Ajustes" onClick={openSettingsSheet}>
+            <SettingsIcon />
+          </Button>
+        }
+      />
 
       {notes.length > 0 && (
         // El toggle de columnas va afuera de la barra: `ProductFilterBar` no

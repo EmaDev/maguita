@@ -21,8 +21,10 @@ import { SettingsRow } from "@/components/molecules/SettingsRow";
 import { UserAvatar } from "@/components/molecules/UserAvatar";
 import { ThemeSegmented } from "@/components/organisms/ThemeToggle";
 import { PinSetupForm } from "@/components/organisms/security/PinSetupForm";
+import { ModuleResetCard } from "@/components/organisms/settings/ModuleResetCard";
 import { APP_NAME, APP_VERSION, ROUTES } from "@/lib/app-config";
 import type { CurrentUser } from "@/lib/auth/dal";
+import type { ResettableModuleInfo } from "@/lib/data/module-reset";
 
 /** Fila clickeable de una lista de ajustes: mismo padding/hover para toda la pantalla. */
 const rowButtonClass =
@@ -32,6 +34,7 @@ export function SettingsPanel({
   user,
   avatarUrl,
   pinSet,
+  resettableModules,
   logoutAction,
   devTools = false,
 }: {
@@ -39,6 +42,8 @@ export function SettingsPanel({
   avatarUrl: string | null;
   /** Si ya hay un PIN de PinLock configurado en la cuenta. */
   pinSet: boolean;
+  /** Módulos/mini-apps con datos cargados, para "Borrar datos" (ver `getModulesWithData`). */
+  resettableModules: ResettableModuleInfo[];
   /** Server Action de cierre de sesión, pasada desde el Server Component. */
   logoutAction: () => Promise<void>;
   /**
@@ -243,6 +248,8 @@ export function SettingsPanel({
           </div>
         </div>
       </section>
+
+      <ModuleResetCard modules={resettableModules} />
     </div>
   );
 }
