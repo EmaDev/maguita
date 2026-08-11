@@ -7,6 +7,7 @@ import {
   SparkleIcon,
 } from "@/components/atoms/icons";
 import type { HomeTab } from "@/components/organisms/home/tabs";
+import type { WalletTab } from "@/components/organisms/mini-apps/wallet-tabs";
 import type { WorkoutTab } from "@/components/organisms/mini-apps/workout-tabs";
 import { ROUTES } from "@/lib/app-config";
 
@@ -51,6 +52,15 @@ export const HOME_TABS: (TabItem & { id: HomeTab })[] = [
 export const WORKOUT_TABS: (TabItem & { id: WorkoutTab })[] = [
   { id: "rutinas", label: "Rutinas" },
   { id: "ejercicios", label: "Ejercicios" },
+];
+
+/**
+ * Tabs de la mini-app Billetera: el gestor de gastos por período de siempre
+ * ("Principal", el mismo `MovementsPanel` de Inicio) y las billeteras extra.
+ */
+export const WALLET_TABS: (TabItem & { id: WalletTab })[] = [
+  { id: "principal", label: "Principal" },
+  { id: "billeteras", label: "Billeteras" },
 ];
 
 export interface ScreenHeader {
@@ -134,6 +144,12 @@ export const SCREEN_HEADERS: Record<string, ScreenHeader> = {
        buscador no se navega. */
     searchable: true,
     searchPlaceholder: "Buscar rutinas o ejercicios…",
+  },
+  [ROUTES.miniAppBilletera]: {
+    title: "Billetera",
+    subtitle: "Tu período y tus billeteras",
+    back: true,
+    tabs: WALLET_TABS,
   },
   [ROUTES.miniAppLinks]: {
     title: "Links guardados",

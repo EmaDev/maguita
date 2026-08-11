@@ -63,6 +63,22 @@ export const RESETTABLE_MODULES: ResettableModule[] = [
     collections: [{ name: COLLECTIONS.habits, keyedBy: "ownerId" }],
   },
   {
+    /**
+     * Sólo las colecciones **propias** de la mini-app. El gestor de gastos por
+     * período que muestra su tab "Principal" es el módulo `movimientos` de
+     * arriba: se sigue borrando desde ahí, para que restablecer las billeteras
+     * no se lleve puesto el período en curso de Inicio (y viceversa).
+     */
+    id: "billetera",
+    name: "Billetera",
+    kind: "mini-app",
+    collections: [
+      { name: COLLECTIONS.wallets, keyedBy: "ownerId" },
+      { name: COLLECTIONS.walletMovements, keyedBy: "ownerId" },
+      { name: COLLECTIONS.walletTrades, keyedBy: "ownerId" },
+    ],
+  },
+  {
     id: "links-guardados",
     name: "Links guardados",
     kind: "mini-app",

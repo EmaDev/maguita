@@ -5,6 +5,7 @@ import { getExpenseCategories, type ExpenseCategoryItem } from "./expense-catego
 import { getHabits } from "./habits";
 import { getNotes } from "./notes";
 import { getProfile } from "./profile";
+import { getWalletShortcuts, type WalletShortcuts } from "./wallets";
 
 /**
  * Datos de la pantalla de Inicio: movimientos, notas y hábitos.
@@ -23,6 +24,13 @@ export interface Movement {
   amount: number;
   /** Día del movimiento en formato `yyyy-mm-dd` (sin hora: se registra por día). */
   date: string;
+  /**
+   * Billetera a la que pertenece (`wallets/{walletId}`), sólo en los
+   * movimientos de la mini-app Billetera — los del gestor de gastos de Inicio
+   * cuelgan de un ciclo, no de una billetera, y no lo traen. Es lo que permite
+   * que las dos fuentes compartan este tipo y la misma `MovementsList`.
+   */
+  walletId?: string;
   /** Se cargó en este dispositivo y todavía no llegó al servidor. */
   local?: boolean;
 }
@@ -88,6 +96,11 @@ export interface HomeData {
   expenseCycle: ExpenseCycle | null;
   /** ABM de categorías del usuario (o el set por default si todavía no tocó el ABM). */
   expenseCategories: ExpenseCategoryItem[];
+  /**
+   * Accesos directos a billeteras de la mini-app Billetera: las fijadas
+   * (con su saldo) para el carrusel del Resumen, y todas para su selector.
+   */
+  walletShortcuts: WalletShortcuts;
   /** Estado de PinLock: si hay PIN configurado y qué tabs de Inicio tienen el candado activo. */
   pinLock: { pinSet: boolean; lockedModules: string[] };
 }
@@ -98,13 +111,15 @@ export interface HomeData {
  * hábitos son todos los suyos.
  */
 export async function getHomeData(userId: string): Promise<HomeData> {
-  const [expenseCycle, expenseCategories, notes, habits, profile] = await Promise.all([
-    getActiveExpenseCycle(userId),
-    getExpenseCategories(userId),
-    getNotes(userId),
-    getHabits(userId),
-    getProfile(userId),
-  ]);
+  const [expenseCycle, expenseCategories, notes, habits, profile, walletShortcuts] =
+    await Promise.all([
+      getActiveExpenseCycle(userId),
+      getExpenseCategories(userId),
+      getNotes(userId),
+      getHabits(userId),
+      getProfile(userId),
+      getWalletShortcuts(userId),
+    ]);
   const movements = expenseCycle ? await getExpenseMovements(expenseCycle.id) : [];
 
   return {
@@ -114,6 +129,7 @@ export async function getHomeData(userId: string): Promise<HomeData> {
     habits,
     expenseCycle,
     expenseCategories,
+    walletShortcuts,
     pinLock: {
       pinSet: Boolean(profile?.preferences.pinHash),
       lockedModules: profile?.preferences.lockedModules ?? [],

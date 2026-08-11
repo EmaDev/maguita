@@ -34,6 +34,15 @@ export interface MiniApp {
 
 const MINI_APPS: MiniApp[] = [
   {
+    id: "billetera",
+    name: "Billetera",
+    description: "Tu período de gastos y una billetera para cada cosa.",
+    category: "Finanzas",
+    icon: "wallet",
+    requiresAuth: true,
+    path: ROUTES.miniAppBilletera,
+  },
+  {
     id: "split-gastos",
     name: "Split de gastos",
     description: "Dividí cuentas entre amigos sin vueltas.",

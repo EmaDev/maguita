@@ -23,6 +23,7 @@ export const ROUTES = {
   miniAppRuletaDecisiones: "/mini-apps/ruleta-decisiones",
   miniAppSorteoExpres: "/mini-apps/sorteo-expres",
   miniAppEntrenamiento: "/mini-apps/entrenamiento",
+  miniAppBilletera: "/mini-apps/billetera",
   /** Herramientas de desarrollo. Sólo existe con `DEV_TOOLS=true` (ver `lib/dev-tools.ts`). */
   debug: "/debug",
   login: "/login",
@@ -39,6 +40,7 @@ export const PROTECTED_ROUTES = [
   ROUTES.miniAppSplitGastos,
   ROUTES.miniAppLinks,
   ROUTES.miniAppEntrenamiento,
+  ROUTES.miniAppBilletera,
   ROUTES.debug,
 ] as const;
 
@@ -49,4 +51,23 @@ export const PROTECTED_ROUTES = [
 /** Detalle de un período cerrado del gestor de gastos (`PastExpenseCyclesSection`). */
 export function periodDetailHref(cycleId: string): string {
   return `${ROUTES.movementsPeriodos}/${cycleId}`;
+}
+
+/**
+ * Nombre del query param con el que se entra derecho a una billetera
+ * (`/mini-apps/billetera?billetera={id}`), desde el carrusel de accesos
+ * directos de Inicio.
+ *
+ * Es un query param y no un segmento de ruta (`/mini-apps/billetera/{id}`)
+ * porque el detalle de una billetera **no es una pantalla aparte**: es un modal
+ * sobre la tab "Billeteras", que necesita el resto de la mini-app montada
+ * detrás. Una ruta propia obligaría a duplicar la pantalla entera sólo para
+ * abrir un modal — a diferencia del detalle de un período cerrado, que sí es
+ * una pantalla completa y por eso sí tiene su ruta.
+ */
+export const WALLET_QUERY_PARAM = "billetera";
+
+/** Link a una billetera puntual dentro de la mini-app (`HomeWalletsCarousel`). */
+export function walletDetailHref(walletId: string): string {
+  return `${ROUTES.miniAppBilletera}?${WALLET_QUERY_PARAM}=${encodeURIComponent(walletId)}`;
 }

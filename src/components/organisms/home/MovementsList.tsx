@@ -1,6 +1,7 @@
 "use client";
 
 import { Card } from "lib-kit-components";
+import { TrashIcon } from "@/components/atoms/icons";
 import type { Movement } from "@/lib/data/home";
 import { formatDay, formatShortDate, formatSignedMoney } from "@/lib/home-model";
 
@@ -21,9 +22,17 @@ interface MovementsListProps {
   movements: Movement[];
   /** Referencia para "Hoy"/"Ayer". Sin ella (períodos ya cerrados) usa fecha absoluta. */
   today?: string;
+  /**
+   * Agrega un botón de borrado por fila. Ausente = lista de sólo lectura, que
+   * es como la usa el gestor de gastos de Inicio (un movimiento de un ciclo no
+   * se borra); lo usa el detalle de una billetera.
+   */
+  onDelete?: (movement: Movement) => void;
+  /** Deshabilita los botones de borrado mientras hay uno en vuelo. */
+  deleting?: boolean;
 }
 
-export function MovementsList({ movements, today }: MovementsListProps) {
+export function MovementsList({ movements, today, onDelete, deleting }: MovementsListProps) {
   const groups = groupByDay(movements, today);
 
   return (
@@ -49,6 +58,17 @@ export function MovementsList({ movements, today }: MovementsListProps) {
                   >
                     {formatSignedMoney(movement.amount)}
                   </span>
+                  {onDelete && (
+                    <button
+                      type="button"
+                      aria-label={`Eliminar ${movement.title}`}
+                      disabled={deleting}
+                      onClick={() => onDelete(movement)}
+                      className="shrink-0 rounded-lg p-1.5 text-muted transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               </Card>
             ))}

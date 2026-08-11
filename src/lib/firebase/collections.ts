@@ -41,6 +41,24 @@ export const COLLECTIONS = {
   expenseMovements: "expenseMovements",
   /** Categorías del gestor de gastos por usuario. Id del documento = `uid`. */
   expenseCategories: "expenseCategories",
+  /**
+   * Billeteras de la mini-app Billetera: cada una para un fin distinto
+   * ("Ahorro auto", "Casa", "Viaje"). Id autogenerado, varias por usuario y
+   * todas activas a la vez — a diferencia de `expenseCycles`, donde sólo hay
+   * un `active`.
+   */
+  wallets: "wallets",
+  /** Movimientos de cada `wallets/{walletId}`. Id autogenerado. */
+  walletMovements: "walletMovements",
+  /**
+   * Libro de operaciones de las billeteras de inversión (`kind: "inversion"`):
+   * depósitos, retiros, compras y ventas. Id autogenerado.
+   *
+   * Es la **única** fuente de verdad de una cartera: la tenencia de cada
+   * activo y el efectivo sin invertir no se guardan en ningún lado, se
+   * derivan de acá (ver `portfolio()` en `wallet-model.ts`).
+   */
+  walletTrades: "walletTrades",
   /** Notas de la tab Notas. Id autogenerado: muchas por usuario. */
   notes: "notes",
   /** Links guardados de la mini-app de links. Id autogenerado: muchos por usuario. */
@@ -164,6 +182,228 @@ export interface ExpenseCategoryItem {
 export interface ExpenseCategoriesDoc {
   /** ABM del usuario. Sin documento todavía = usa `DEFAULT_EXPENSE_CATEGORIES`. */
   categories: ExpenseCategoryItem[];
+  updatedAt: Timestamp;
+}
+
+/**
+ * Color con el que se pinta una billetera en la grilla. Lista cerrada, y
+ * sólo con tokens que existen en el tema (`globals.css` de
+ * `lib-kit-components`): el registro con su etiqueta y sus clases vive en
+ * `src/lib/wallet-model.ts`.
+ */
+export type WalletColor = "primary" | "accent" | "success" | "danger" | "muted";
+
+/**
+ * Perfil de la billetera: qué es lo que administra, y con eso qué significa su
+ * saldo y qué carga adentro.
+ *
+ * - `gastos` / `ahorro`: bolsas de plata con movimientos (+ ingreso, − gasto).
+ *   Son la misma mecánica; se separan porque el número que importa es distinto
+ *   (lo que queda vs. cuánto falta para la meta).
+ * - `credito`: tarjeta o préstamo. Los mismos movimientos, pero el saldo se
+ *   lee al revés — un consumo *aumenta* lo que debés — y tiene límite.
+ * - `inversion`: no lleva movimientos sino **posiciones**
+ *   (`walletPositions`): qué compraste, cuándo y a cuánto. Su valor no es un
+ *   saldo cargado a mano, se calcula contra la cotización de cada activo.
+ *
+ * Lista cerrada; el registro con etiqueta, emoji y semántica vive en
+ * `src/lib/wallet-model.ts`.
+ */
+export type WalletKind = "gastos" | "ahorro" | "credito" | "inversion";
+
+/**
+ * Moneda en la que están todos los montos de una billetera y de sus
+ * movimientos/posiciones. Lista cerrada, registro en `wallet-model.ts`.
+ *
+ * No hay conversión entre monedas en ningún lado: una billetera en USD muestra
+ * dólares y punto. Mezclar monedas en un total exigiría una cotización, que es
+ * justamente lo que todavía no existe (ver `WalletPositionDoc.currentPrice`).
+ */
+export type CurrencyCode = "ARS" | "USD" | "EUR" | "BRL" | "USDT";
+
+/** Qué clase de activo es una posición de una billetera de inversión. */
+export type AssetType =
+  | "accion"
+  | "cedear"
+  | "cripto"
+  | "fondo"
+  | "bono"
+  | "plazo-fijo"
+  | "otro";
+
+/**
+ * Una billetera de la mini-app Billetera: una bolsa de plata con un fin
+ * propio, su saldo y sus movimientos. Es la extensión del gestor de gastos a
+ * varias cuentas — el "principal" de la mini-app sigue siendo
+ * `expenseCycles`/`expenseMovements`, que no cambia.
+ */
+export interface WalletDoc {
+  ownerId: string;
+  /** Nombre libre, ej. "Ahorro auto". Máx. 40 caracteres. */
+  name: string;
+  /** Emoji que la identifica en la grilla, elegido de una paleta fija (no input libre). */
+  emoji: string;
+  color: WalletColor;
+  /**
+   * Qué administra la billetera. **No se puede cambiar después de crearla**:
+   * cada tipo guarda cosas distintas (movimientos vs. posiciones) y con otra
+   * semántica del saldo, así que cambiarlo dejaría datos cargados que ya no
+   * significan lo que significaban. Ver `updateWalletAction`.
+   */
+  kind: WalletKind;
+  /**
+   * Moneda de todos sus montos. **Tampoco se puede cambiar después**: los
+   * movimientos y posiciones ya cargados están expresados en ella, y
+   * reinterpretarlos en otra sin una cotización sería inventar números.
+   */
+  currency: CurrencyCode;
+  /** Para qué es esta billetera, ej. "Cuota + seguro". `null` = sin bajada. Máx. 80. */
+  purpose: string | null;
+  /**
+   * Plata con la que arranca la billetera. El saldo es esto ± sus movimientos.
+   * Siempre `0` en `kind: "inversion"`, que no lleva movimientos.
+   */
+  initialBalance: number;
+  /** Meta de ahorro opcional, para la barra de progreso de la card. `null` = sin meta. */
+  targetAmount: number | null;
+  /**
+   * Límite de la tarjeta/préstamo, sólo en `kind: "credito"` (`null` en el
+   * resto). Es el análogo de `targetAmount` para una billetera de crédito: la
+   * barra mide cuánto del límite ya está consumido.
+   */
+  creditLimit: number | null;
+  /**
+   * Última cotización conocida de cada activo de la cartera, con el símbolo
+   * como clave (`quotes.AAPL`). Sólo en `kind: "inversion"`; `{}` mientras no
+   * se cargó ninguna.
+   *
+   * Es un mapa dentro de la billetera y no una colección aparte por el mismo
+   * motivo que `HabitDoc.actionDoneDates`: Firestore soporta rutas de campo
+   * por clave, así que actualizar el precio de un símbolo es una escritura
+   * atómica de un solo campo (`quotes.${symbol}`) sin leer ni reescribir el
+   * resto. Y va por billetera, no global, porque el precio está expresado en
+   * la moneda de *esa* billetera — el mismo activo en una cartera en USD y en
+   * otra en ARS no cotiza igual.
+   */
+  quotes: Record<string, WalletQuote>;
+  /**
+   * Si aparece como acceso directo en el carrusel de Inicio. Es un campo de la
+   * propia billetera y no un array aparte tipo `favorites/{uid}`: se prende y
+   * apaga de a una (`toggleWalletHomePinAction`), así que un array obligaría a
+   * un read-modify-write y a que dos dispositivos se pisaran el cambio.
+   *
+   * Las billeteras creadas antes de este campo no lo tienen: se lee con
+   * `?? false` (ver `getWallets`) en vez de migrarlas.
+   */
+  pinnedToHome: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+/**
+ * Un movimiento de una billetera. Misma forma que `ExpenseMovementDoc` (y por
+ * eso los dos se muestran con `MovementsList`), pero en su propia colección:
+ * ver la nota de diseño en `docs/firestore-schema.md`.
+ */
+export interface WalletMovementDoc {
+  walletId: string;
+  /** Duplicado del `ownerId` de la billetera, mismo criterio que `ExpenseMovementDoc.ownerId`. */
+  ownerId: string;
+  title: string;
+  /** Nombre y emoji de la categoría al momento de cargarlo, copiados de `expenseCategories/{uid}`. */
+  category: string;
+  categoryEmoji: string;
+  /** Negativo = gasto, positivo = ingreso. Pesos enteros. */
+  amount: number;
+  date: string;
+  createdAt: Timestamp;
+}
+
+/**
+ * Qué clase de operación es un asiento del libro de una cartera.
+ *
+ * - `deposito` / `retiro`: plata que entra o sale de la billetera sin comprar
+ *   ni vender nada. Es lo que mueve el **efectivo sin invertir**.
+ * - `compra`: sale efectivo, entra tenencia.
+ * - `venta`: sale tenencia, **entra efectivo** — la plata de una venta queda
+ *   sin invertir dentro de la misma billetera hasta que se retire o se use en
+ *   otra compra.
+ * - `dividendo`: entra efectivo por un activo, sin tocar la tenencia.
+ * - `comision`: sale efectivo, sin tocar la tenencia.
+ */
+export type TradeKind = "deposito" | "retiro" | "compra" | "venta" | "dividendo" | "comision";
+
+/**
+ * Un asiento del libro de operaciones de una billetera de inversión.
+ *
+ * **Es la única fuente de verdad de una cartera.** No hay ningún documento que
+ * guarde "cuántas acciones tengo" ni "cuánto efectivo me queda": las dos cosas
+ * se derivan recorriendo estos asientos en orden (`portfolio()`,
+ * `wallet-model.ts`). Es lo que hace que la cartera sea trazable — cada unidad
+ * y cada peso que muestra la pantalla se puede seguir hasta la operación que
+ * lo puso ahí, y no existe forma de que un total y su detalle se
+ * desincronicen, porque el total *es* el detalle sumado.
+ *
+ * Los asientos **no se editan**: para corregir uno se lo borra y se carga de
+ * nuevo (ver `deleteTradeAction`). Un asiento editable rompería la lectura del
+ * libro como historia de lo que pasó.
+ *
+ * **Es la única forma del repo con decimales.** El resto de los montos son
+ * pesos enteros (ver `Movement.amount`), pero acá no alcanza: media acción o
+ * 0.0031 BTC son cantidades reales, y un precio unitario redondeado a entero
+ * destruiría el cálculo del rendimiento.
+ */
+export interface WalletTradeDoc {
+  walletId: string;
+  /** Duplicado del `ownerId` de la billetera, mismo criterio que `WalletMovementDoc`. */
+  ownerId: string;
+  kind: TradeKind;
+  /** Día de la operación, `yyyy-mm-dd`. Es lo que ordena el libro. */
+  date: string;
+  /**
+   * Símbolo del activo, normalizado a mayúsculas ("AAPL", "BTC", "GGAL").
+   * `null` en depósitos, retiros y comisiones, que no son de ningún activo.
+   *
+   * Es la clave por la que se agrupan las tenencias y con la que la futura API
+   * de cotizaciones va a pedir el precio; hoy no se valida contra ningún
+   * catálogo (ver la nota de diseño).
+   */
+  assetSymbol: string | null;
+  /** Nombre legible, ej. "Apple Inc.". Copiado en cada asiento del activo. Máx. 60. */
+  assetName: string | null;
+  assetType: AssetType | null;
+  /** Unidades operadas, siempre positivo. `null` fuera de compra/venta. */
+  quantity: number | null;
+  /** Precio por unidad de esta operación, en la moneda de la billetera. `null` fuera de compra/venta. */
+  unitPrice: number | null;
+  /**
+   * Plata que la operación mueve en el efectivo de la billetera, **con
+   * signo**: positivo entra (depósito, venta, dividendo), negativo sale
+   * (retiro, compra, comisión).
+   *
+   * Se guarda aunque en compra/venta sea derivable de `quantity × unitPrice`:
+   * es la columna que hace que el efectivo se lea como un extracto —sumar
+   * `cashAmount` de todo el libro *es* el saldo— y deja lugar a que una
+   * operación mueva un importe distinto al teórico (una comisión incluida,
+   * un redondeo del broker).
+   */
+  cashAmount: number;
+  /** Nota libre del usuario. `null` = ninguna. Máx. 140. */
+  note: string | null;
+  createdAt: Timestamp;
+}
+
+/**
+ * Última cotización conocida de un activo, dentro del mapa `WalletDoc.quotes`.
+ *
+ * Hoy la escribe el usuario a mano (`setQuoteAction`). **Es el punto de
+ * enganche de la API de cotizaciones**: cuando exista, un job va a escribir
+ * estas mismas claves por símbolo y toda la pantalla de rendimiento va a
+ * funcionar sin cambiar una línea más.
+ */
+export interface WalletQuote {
+  /** Precio por unidad, en la moneda de la billetera. */
+  price: number;
   updatedAt: Timestamp;
 }
 
@@ -461,6 +701,9 @@ export interface CollectionTypes {
   [COLLECTIONS.expenseCycles]: ExpenseCycleDoc;
   [COLLECTIONS.expenseMovements]: ExpenseMovementDoc;
   [COLLECTIONS.expenseCategories]: ExpenseCategoriesDoc;
+  [COLLECTIONS.wallets]: WalletDoc;
+  [COLLECTIONS.walletMovements]: WalletMovementDoc;
+  [COLLECTIONS.walletTrades]: WalletTradeDoc;
   [COLLECTIONS.notes]: NoteDoc;
   [COLLECTIONS.links]: LinkDoc;
   [COLLECTIONS.habits]: HabitDoc;

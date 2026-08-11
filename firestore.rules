@@ -57,6 +57,34 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /* Billeteras de la mini-app Billetera y sus movimientos. Colecciones
+       propias, separadas de expenseCycles/expenseMovements (ver la nota de
+       diseño en docs/firestore-schema.md). Id autogenerado, mismo criterio por
+       campo (`ownerId`) que el gestor de gastos: `walletMovements` duplica el
+       `ownerId` de su billetera justamente para que esta regla no necesite un
+       get() del documento padre. */
+    match /wallets/{walletId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /walletMovements/{movementId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
+    /* Libro de operaciones de las billeteras de inversión. Mismo criterio por
+       campo: no hereda nada del match de `wallets` —las reglas no se anidan
+       por relación, sólo por ruta— y por eso `walletTrades` también duplica el
+       `ownerId`. Cerrada a escritura como todo el resto: los asientos los
+       escribe `recordTradeAction` con el Admin SDK, que saltea estas reglas.
+       Las cotizaciones no tienen match propio porque viven en un mapa dentro
+       del documento de la billetera (`wallets.quotes`), ya cubierto arriba. */
+    match /walletTrades/{tradeId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+
     // Notas de la tab Notas. Id autogenerado, mismo criterio por campo que
     // expenseCycles/expenseMovements.
     match /notes/{noteId} {

@@ -214,6 +214,7 @@ export function HomeBoard({ data }: { data: HomeData }) {
           expenseCycle={data.expenseCycle}
           notes={notes}
           habits={data.habits}
+          walletShortcuts={data.walletShortcuts}
           onGoTo={setTab}
         />
       );

@@ -20,6 +20,9 @@ una descripción). Ver también la nota en `AGENTS.md`.
 | `expenseCycles` | autogenerado | `src/lib/firebase/collections.ts` → `ExpenseCycleDoc` |
 | `expenseMovements` | autogenerado | `src/lib/firebase/collections.ts` → `ExpenseMovementDoc` |
 | `expenseCategories` | `uid` de Firebase Auth | `src/lib/firebase/collections.ts` → `ExpenseCategoriesDoc` |
+| `wallets` | autogenerado | `src/lib/firebase/collections.ts` → `WalletDoc` |
+| `walletMovements` | autogenerado | `src/lib/firebase/collections.ts` → `WalletMovementDoc` |
+| `walletTrades` | autogenerado | `src/lib/firebase/collections.ts` → `WalletTradeDoc` |
 | `notes` | autogenerado | `src/lib/firebase/collections.ts` → `NoteDoc` |
 | `links` | autogenerado | `src/lib/firebase/collections.ts` → `LinkDoc` |
 | `habits` | autogenerado | `src/lib/firebase/collections.ts` → `HabitDoc` |
@@ -76,6 +79,46 @@ erDiagram
     EXPENSE_CATEGORIES {
         object_array categories "id, name, emoji — ABM del usuario"
         timestamp updatedAt
+    }
+    WALLETS {
+        string ownerId
+        string name "ej. Ahorro auto"
+        string emoji "de una paleta fija, no input libre"
+        string color "primary | accent | success | danger | muted"
+        string kind "gastos | ahorro | credito | inversion — fijo desde el alta"
+        string currency "ARS | USD | EUR | BRL | USDT — fija desde el alta"
+        string purpose "nullable, de qué se encarga esta billetera"
+        number initialBalance "saldo con el que arranca, 0 en inversión"
+        number targetAmount "nullable, meta de ahorro"
+        number creditLimit "nullable, sólo kind credito"
+        map quotes "símbolo -> precio + fecha, sólo kind inversion"
+        boolean pinnedToHome "acceso directo en el carrusel de Inicio"
+        timestamp createdAt
+        timestamp updatedAt
+    }
+    WALLET_TRADES {
+        string walletId
+        string ownerId "duplicado de la billetera"
+        string kind "deposito | retiro | compra | venta | dividendo | comision"
+        string date "yyyy-mm-dd"
+        string assetSymbol "nullable — AAPL, BTC; clave de la API de cotizaciones"
+        string assetName "nullable"
+        string assetType "nullable"
+        number quantity "nullable, admite decimales"
+        number unitPrice "nullable, precio de esta operación"
+        number cashAmount "con signo: + entra al efectivo, − sale"
+        string note "nullable"
+        timestamp createdAt
+    }
+    WALLET_MOVEMENTS {
+        string walletId
+        string ownerId "duplicado de la billetera, evita un get() extra"
+        string title
+        string category "copiado del ABM al momento del alta"
+        string categoryEmoji
+        number amount "negativo: gasto — positivo: ingreso"
+        string date "yyyy-mm-dd"
+        timestamp createdAt
     }
     NOTES {
         string ownerId
@@ -155,6 +198,10 @@ erDiagram
     USERS ||--o| EXPENSE_CATEGORIES : "mismo uid"
     EXPENSE_CYCLES ||--o{ EXPENSE_MOVEMENTS : "cycleId"
     EXPENSE_CATEGORIES ||--o{ EXPENSE_MOVEMENTS : "category/categoryEmoji copiados al alta, sin FK"
+    USERS ||--o{ WALLETS : "ownerId, hasta 12, todas activas a la vez"
+    WALLETS ||--o{ WALLET_MOVEMENTS : "walletId, en gastos/ahorro/credito"
+    WALLETS ||--o{ WALLET_TRADES : "walletId, sólo en kind inversion"
+    EXPENSE_CATEGORIES ||--o{ WALLET_MOVEMENTS : "mismo ABM que los gastos del ciclo, copiado al alta"
     NOTIFICATIONS {
         string ownerId
         string topic "id del registro de topics"
@@ -389,6 +436,278 @@ Decisiones de diseño:
   solo mientras está abierto — reciba props nuevas; devolver el array ya
   actualizado evita un segundo viaje a Firestore sólo para refrescar la
   lista en pantalla.
+
+### `wallets/{walletId}` y `walletMovements/{movementId}`
+
+Mini-app privada **Billetera** (`/mini-apps/billetera`): varias bolsas de plata
+en paralelo, cada una para un fin distinto ("Ahorro auto", "Casa", "Viaje"),
+con su saldo y sus movimientos.
+
+Es la **extensión** del gestor de gastos a varias cuentas, no su reemplazo: la
+tab "Principal" de la mini-app es literalmente el `MovementsPanel` de la tab
+Movimientos de Inicio y sigue leyendo `expenseCycles`/`expenseMovements` sin
+ningún cambio. Estas dos colecciones son sólo las billeteras extra.
+
+`wallets/{walletId}` (id autogenerado, dueño por campo como `notes`/`habits`):
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `ownerId` | `string` | uid del dueño |
+| `name` | `string` | nombre libre, ej. "Ahorro auto". Máx. 40 caracteres |
+| `emoji` | `string` | de la paleta fija de `wallet-model.ts`, no un input libre |
+| `color` | `WalletColor` | `primary`/`accent`/`success`/`danger`/`muted`. Lista cerrada, y **sólo con tokens que existen en el tema** (`globals.css` de `lib-kit-components` no define `warning`) |
+| `kind` | `WalletKind` | `gastos`/`ahorro`/`credito`/`inversion`. **Fijo desde el alta** (ver abajo) |
+| `currency` | `CurrencyCode` | `ARS`/`USD`/`EUR`/`BRL`/`USDT`. **Fija desde el alta** |
+| `creditLimit` | `number \| null` | límite de la tarjeta/préstamo. Sólo en `kind: "credito"`, `null` en el resto |
+| `purpose` | `string \| null` | de qué se encarga la billetera, ej. "Cuota y seguro". Máx. 80. `null` = sin bajada |
+| `initialBalance` | `number` | plata con la que arranca, pesos enteros |
+| `targetAmount` | `number \| null` | meta de ahorro. `null` = sin meta, la card no dibuja la barra |
+| `pinnedToHome` | `boolean` | si aparece como acceso directo en el carrusel del Resumen de Inicio. Ausente en billeteras creadas antes del campo: se lee con `?? false` |
+| `createdAt` / `updatedAt` | `Timestamp` | `createdAt` es lo que ordena la grilla y el carrusel |
+
+`walletMovements/{movementId}` (id autogenerado):
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `walletId` | `string` | referencia a `wallets/{walletId}` |
+| `ownerId` | `string` | duplicado del `ownerId` de la billetera, mismo motivo que en `expenseMovements` |
+| `title` | `string` | concepto. Vacío = se completa con el nombre de la categoría |
+| `category` / `categoryEmoji` | `string` | **copiados al alta** desde `expenseCategories/{uid}` — el mismo ABM que usan los gastos del ciclo, no uno propio. Los ingresos usan la categoría fija `"Ingreso"` / `💰` |
+| `amount` | `number` | negativo = gasto, positivo = ingreso |
+| `date` | `string` | `yyyy-mm-dd` |
+| `createdAt` | `Timestamp` | — |
+
+`walletTrades/{tradeId}` (id autogenerado) — el **libro de operaciones**, sólo
+de las billeteras con `kind: "inversion"`:
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `walletId` | `string` | referencia a `wallets/{walletId}` |
+| `ownerId` | `string` | duplicado, mismo motivo que en `walletMovements` |
+| `kind` | `TradeKind` | `deposito`/`retiro`/`compra`/`venta`/`dividendo`/`comision` |
+| `date` | `string` | `yyyy-mm-dd`. Es lo que ordena el libro |
+| `assetSymbol` | `string \| null` | mayúsculas, sin puntos ("AAPL", "BTC"). `null` en depósito/retiro/comisión. Clave de agrupación de tenencias y de la futura API de cotizaciones |
+| `assetName` / `assetType` | `string \| null` / `AssetType \| null` | copiados en cada asiento del activo |
+| `quantity` | `number \| null` | unidades operadas, positivo. **Admite decimales**. `null` fuera de compra/venta |
+| `unitPrice` | `number \| null` | precio por unidad de *esta* operación. `null` fuera de compra/venta |
+| `cashAmount` | `number` | **con signo**: `+` entra al efectivo (depósito, venta, dividendo), `−` sale (retiro, compra, comisión) |
+| `note` | `string \| null` | nota libre. Máx. 140 |
+| `createdAt` | `Timestamp` | desempata dos asientos del mismo día |
+
+**No existe ningún documento de "tenencia" ni de "saldo de la cartera".** Las
+unidades de cada activo, su costo promedio, el resultado realizado y el
+efectivo sin invertir salen todos de recorrer este libro en orden
+(`portfolio()`, `wallet-model.ts`).
+
+Accesores: `getWallets` / `getWalletMovements` / `getWalletTrades` /
+`getWalletsWithContents` / `getWalletShortcuts` (`src/lib/data/wallets.ts`,
+sólo Server Components); `addWalletAction`, `updateWalletAction`,
+`deleteWalletAction`, `toggleWalletHomePinAction`, `addWalletMovementAction`,
+`deleteWalletMovementAction`, `recordTradeAction`, `deleteTradeAction`,
+`setQuoteAction` (`src/lib/data/wallets-actions.ts`, Server Actions — todas
+re-verifican la sesión y el dueño del documento). Los cálculos de saldo,
+cartera y formato por moneda son puros y viven en `src/lib/wallet-model.ts`,
+compartidos entre la validación del server y la pantalla.
+
+Decisiones de diseño:
+
+- **Colección propia (`walletMovements`) en vez de sumarle un `walletId` a
+  `expenseMovements`.** Reusar la colección del gestor de gastos habría
+  obligado a volver `cycleId` nullable —y con eso a re-auditar cada consulta
+  que hoy asume que todo movimiento cuelga de un ciclo— y, sobre todo, habría
+  mezclado los dos módulos en el borrado por módulo de Ajustes:
+  `resetModuleDataAction` borra por `ownerId`, así que "restablecer
+  Movimientos" se habría llevado puestas también las billeteras. Con dos
+  colecciones, cada módulo de `RESETTABLE_MODULES` borra lo suyo y nada más.
+  El precio es duplicar unas pocas líneas de lectura/escritura; lo que sí se
+  comparte es todo lo que importa: la forma del movimiento (`Movement`), el
+  ABM de categorías, `MovementsList` y `formatMoney`.
+- **El saldo se deriva, no se guarda.** `walletTotals` lo calcula en cada
+  lectura a partir de `initialBalance` y los movimientos, igual que
+  `expenseCycleProgress` con el ciclo. Un campo acumulado habría que
+  mantenerlo sincronizado en cada alta y en cada baja, y se desincroniza en el
+  primer error a mitad de camino.
+- **Una sola consulta de movimientos por usuario, agrupada en memoria.**
+  `getWalletMovements` filtra por `ownerId` (no por `walletId`) y
+  `getWalletsWithMovements` los agrupa en un `Map`. Una consulta por billetera
+  —o un `in` sobre sus ids— serían N lecturas o un índice compuesto para traer
+  exactamente los mismos documentos: la grilla muestra el saldo de todas y el
+  detalle de cualquiera al tocarla, así que igual las necesita todas. Mismo
+  criterio que `getWorkoutSessions`.
+- **Sin `orderBy` en ninguna de las dos consultas.** Las dos filtran sólo por
+  `ownerId` (`==`) y ordenan en memoria (`createdAt` para las billeteras,
+  `byDayDesc` para los movimientos) — mismo criterio que
+  `getNotes`/`getLinks`/`getExpenseMovements`, evita un índice compuesto.
+- **`emoji` y `color` se estrechan del lado del server.** El cliente los elige
+  de grillas fijas, así que `normalizeWalletFields` los valida contra los
+  mismos registros de `wallet-model.ts` y cae al default en vez de guardar lo
+  que llegue; `getWallets` vuelve a validar `color` **al leer** para que un
+  documento viejo con un color que ya no está en el registro no rompa la
+  grilla (mismo criterio que `group`/`equipment` en `getCustomExercises`).
+- **Borrar una billetera borra sus movimientos.** A diferencia de un
+  `expenseCycle` cerrado —que queda como historial— una billetera borrada no
+  se puede volver a ver desde ninguna pantalla, así que dejar sus movimientos
+  huérfanos sólo sumaría documentos invisibles que igual se leen en cada carga
+  (`getWalletMovements` consulta por `ownerId`, no por billetera). Va en tandas
+  de 500 (el tope de un `WriteBatch`) repitiendo hasta vaciar, igual que
+  `deleteOwnedDocs` en `module-reset-actions.ts`.
+- **`initialBalance` sí es editable**, a diferencia del saldo inicial de un
+  `expenseCycle`. Allá cambiarlo a mitad de período resignificaría los gastos
+  ya cargados contra un punto de partida distinto al que tenían; una billetera
+  no es un período contra el que se mida nada, es una bolsa viva cuyo punto de
+  partida el usuario puede haber cargado mal.
+- **Un solo alta para gasto e ingreso** (`addWalletMovementAction`, con un
+  `kind`), a diferencia del gestor de gastos que tiene
+  `addExpenseMovementAction` y `addExpenseIncomeAction` por separado: acá los
+  dos escriben exactamente el mismo documento —no hay ciclo activo que validar
+  ni umbral de tope que avisar—, así que la única diferencia es el signo y de
+  dónde sale la categoría.
+- **Tope de 12 billeteras por cuenta.** La grilla las muestra todas juntas sin
+  paginar y cada carga baja también sus movimientos; mismo tipo de resguardo
+  que el tope de 50 hábitos. Se chequea con un `count()`, que devuelve el
+  número sin traerse los documentos.
+- **El tipo (`kind`) es lo que define qué lleva adentro la billetera.** Es un
+  campo y no cuatro colecciones distintas porque todo lo que las rodea es
+  idéntico: nombre, ícono, color, moneda, el candado, el carrusel de Inicio, el
+  borrado en cascada. Lo único que cambia es qué se carga y cómo se lee el
+  número principal, y eso se resuelve con un registro
+  (`WALLET_KINDS`, `wallet-model.ts`) que expone dos banderas —`usesPositions`
+  e `isDebt`— en vez de un `switch` repetido en cada pantalla.
+  `walletHeadline`/`walletProgress` son las que traducen ese registro a "qué
+  número muestro y con qué nombre", así que la grilla, el detalle y el carrusel
+  de Inicio dicen exactamente lo mismo sin coordinarse.
+- **`credito` invierte el signo al mostrar, no al guardar.** Un consumo se
+  guarda como movimiento negativo igual que un gasto (misma colección, misma
+  forma), y es `walletHeadline` la que muestra "Deuda: $5.000" en vez de
+  "−$5.000". Guardarlo con el signo cambiado habría hecho que `walletTotals`
+  —que es la misma función para los cuatro tipos— necesitara saber el tipo.
+- **Una cartera es un libro de operaciones, y todo lo demás se deriva.** No hay
+  ningún documento que diga "tengo 6 AAPL" ni "me quedan $820 sin invertir":
+  las dos cosas salen de recorrer `walletTrades` en orden. Es lo que hace la
+  cartera trazable de punta a punta —cada unidad y cada peso se puede seguir
+  hasta el asiento que lo puso ahí— y lo que **hace imposible** que un total y
+  su detalle se desincronicen, porque el total *es* el detalle sumado. Borrar
+  una operación no necesita recalcular nada: el fold vuelve a correr sobre lo
+  que quedó.
+
+  La contracara es que cada lectura recalcula. Con un tope de 500 asientos por
+  cartera es un `for` sobre unos cientos de objetos en memoria, muy por debajo
+  de lo que costaría mantener contadores sincronizados y de los bugs que eso
+  arrastra.
+
+  El invariante que tiene que cerrar siempre es
+  **`aportado + resultado total = valor de la cartera`** (depósitos − retiros,
+  más lo ganado realizado y sin realizar, igual a efectivo + valor de mercado).
+- **Costo promedio ponderado, no FIFO.** Cada compra promedia su precio con lo
+  que ya había; cada venta saca unidades a ese promedio y la diferencia contra
+  lo que entró de efectivo es el resultado realizado. Es el criterio estándar y
+  el único que no obliga a guardar de qué compra puntual salió cada unidad
+  vendida — FIFO exigiría un modelo de lotes que este libro deliberadamente no
+  tiene.
+- **El orden del recorrido es parte del cálculo, no cosmética.** `byTradeOrder`
+  ordena por día, después por `createdAt` y después por id: el costo promedio y
+  el resultado de cada venta dependen de qué se compró antes, así que recorrer
+  el mismo libro en otro orden da otros números. Vive en `wallet-model.ts` (no
+  en la consulta) para que el server y el cliente usen exactamente el mismo.
+- **Los asientos no se editan, sólo se borran.** Un asiento editable dejaría de
+  ser el registro de lo que pasó. Borrar puede dejar el libro incompleto (una
+  venta cuya compra se borró): en vez de bloquearlo, el fold clampea la
+  cantidad en cero y marca la tenencia como `inconsistent` para que la pantalla
+  lo avise — atar al usuario a un asiento mal cargado sería peor.
+- **La plata de una venta no se "acredita" en ningún lado.** Queda como
+  efectivo sin invertir por construcción: el efectivo *es* la suma de la
+  columna `cashAmount`, así que asentar la venta ya lo deja disponible para
+  otra compra o para retirar. Sin un saldo que actualizar, no hay forma de que
+  una venta se registre y el efectivo no se entere.
+- **El efectivo puede quedar negativo y no se bloquea.** Cargar una compra sin
+  el depósito previo es normal cuando se está cargando historial fuera de
+  orden; el composer avisa y la cartera lo muestra en rojo. Trabar la carga
+  obligaría a inventar un depósito para poder seguir.
+- **`cashAmount` se guarda aunque en compra/venta sea derivable.** Es la
+  columna que hace que el efectivo se lea como un extracto, y deja lugar a que
+  una operación mueva un importe distinto al teórico (comisión del broker
+  incluida, redondeo) — que es justamente lo que el campo "importe total"
+  opcional del composer permite cargar.
+- **Las cotizaciones van en un mapa dentro de la billetera
+  (`wallets.quotes`), no en una colección.** Firestore soporta rutas de campo
+  por clave, así que actualizar un símbolo es una escritura atómica de un solo
+  campo (`quotes.AAPL`) sin leer ni reescribir el resto — misma mecánica que
+  `HabitDoc.actionDoneDates`, y por eso el símbolo **no puede tener puntos**
+  (`quotes.BRK.B` escribiría en `quotes → BRK → B`). Y va por billetera y no
+  global porque el precio está expresado en la moneda de *esa* billetera.
+
+  Cotizar **no es una operación**: no mueve efectivo ni tenencia, sólo cambia a
+  cuánto se valúa lo que ya está. Por eso no entra al libro.
+- **`kind` y `currency` no se pueden editar.** Cambiar el tipo dejaría
+  movimientos en una billetera que pasó a llevar un libro (o al revés) y
+  resignificaría su saldo; cambiar la moneda reinterpretaría en otra unidad
+  montos cargados en la vieja, que sin una cotización es inventar números.
+  `updateWalletAction` los ignora del lado del server —no sólo los esconde la
+  UI— y valida el resto de los campos contra el `kind` **guardado**, no contra
+  el que mande el cliente.
+- **Nunca se suman dos monedas.** No hay un total de todas las billeteras en
+  ningún lado, ni en la grilla ni en el carrusel de Inicio: cada una muestra su
+  propio número en su propia moneda. Sumar pesos con dólares exigiría una
+  cotización que la app todavía no tiene, y un total mal sumado es peor que no
+  mostrar ninguno.
+- **`wallets.quotes` es el enganche de la API de cotizaciones.** Hoy lo escribe
+  el usuario a mano (`setQuoteAction`), que existe como acción chica y separada
+  del libro justamente porque es **la misma escritura** que va a hacer la
+  integración cuando exista: buscar por `assetSymbol`, escribir precio y fecha.
+  El día que se enchufe no hay que rediseñar nada — `portfolio()` ya calcula el
+  rendimiento a partir de ese mapa, sin importar quién lo llenó. Y sin precio
+  **no se inventa un valor**: la tenencia vale lo que costó, se marca
+  `priced: false` y la UI dice "sin cotización" en vez de un 0% que se leería
+  como "ni ganó ni perdió".
+- **El libro es la única forma del repo con decimales.** El resto de los
+  montos son pesos enteros (ver `Movement.amount`), pero media acción o 0.0031
+  BTC son cantidades reales y un precio unitario redondeado destruiría el
+  cálculo. Por eso su composer usa un `Input` numérico común y no
+  `AmountInput`, que formatea con separador de miles y redondea a entero. Las
+  comparaciones de cantidades llevan un epsilon (`1e-9`): sin él, vender "todo"
+  lo que la pantalla muestra podría rebotar por el resto de punto flotante que
+  deja multiplicar decimales.
+- **`formatAmount` no usa `Intl.NumberFormat(style: "currency")`.** Mismo
+  criterio y mismo motivo que `formatMoney` en `home-model.ts`: el símbolo y el
+  espaciado que mete cada runtime varían entre Node y el browser, y esa
+  diferencia es un mismatch de hidratación. Se arma a mano con el prefijo del
+  registro de monedas.
+- **`pinnedToHome` es un campo de la billetera, no un array tipo
+  `favorites/{uid}`.** Los accesos directos de Inicio se prenden y apagan de a
+  uno (`toggleWalletHomePinAction`), así que un array con la selección entera
+  obligaría a un read-modify-write: fijar una billetera desde el celular y otra
+  desde la compu se pisarían. Es la diferencia con `favorites.miniAppIds`, que
+  sí es un array pero **guarda el orden** de alta (y por eso paga una
+  transacción propia en `toggleFavorite`); acá el orden del carrusel es el
+  mismo `createdAt` que el de la grilla, así que no hay nada que ordenar.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser (WalletsPanel)
+    participant SA as Server Action
+    participant FS as Firestore
+
+    B->>SA: addWalletAction({name, emoji, color, initialBalance, targetAmount})
+    SA->>FS: count() wallets where ownerId==uid
+    alt ya tiene 12
+        SA-->>B: throw (rechazado)
+    else hay lugar
+        SA->>FS: add wallets {ownerId, ...}
+        SA-->>B: revalidatePath(/mini-apps/billetera)
+    end
+
+    B->>SA: addWalletMovementAction({walletId, amount, kind, categoryId})
+    SA->>FS: get wallets/{walletId}
+    alt ownerId != uid
+        SA-->>B: throw (rechazado)
+    else válido
+        opt kind == "expense"
+            SA->>FS: get expenseCategories/{uid}
+        end
+        SA->>FS: add walletMovements {walletId, ownerId, category, amount: ±monto, ...}
+        SA-->>B: revalidatePath(/mini-apps/billetera)
+    end
+```
 
 ### `notes/{noteId}`
 
@@ -1091,6 +1410,404 @@ documento entero, campos nuevos incluidos — Firestore no tiene reglas a
 nivel de campo para lectura.
 
 ## Changelog
+
+### 2026-08-11 — Carteras: libro de operaciones, ventas y efectivo sin invertir
+
+**Qué cambió.** Una billetera de inversión pasó a llevar un **libro de
+operaciones** —depósitos, retiros, compras, ventas, dividendos y comisiones— en
+vez de una lista de posiciones editables a mano. Vender un activo descuenta las
+unidades y **el importe queda como efectivo sin invertir** dentro de la misma
+billetera, listo para otra compra o para retirar.
+
+**Reemplaza a `walletPositions`**, que se agregó más temprano hoy y se retira:
+la colección nueva es `walletTrades`. Es un cambio de fondo, no un agregado —
+ver el porqué abajo. Las cotizaciones se mudaron del documento de la posición a
+un mapa `quotes` en el documento de la billetera.
+
+> **Al desplegar**: `walletPositions` queda sin código que la lea ni la escriba.
+> No hay migración automática (la mini-app se creó hoy mismo, sin datos en
+> producción). Si alguna cuenta llegó a cargar posiciones, hay que borrar esa
+> colección a mano — el borrado en cascada y el módulo `billetera` de Ajustes
+> ya apuntan a `walletTrades`.
+
+- **Por qué un libro y no posiciones editables.** El pedido fue "lo más
+  profesional y trazable posible", y una tenencia que se puede editar a mano no
+  es trazable: el número que muestra la pantalla no tiene por qué corresponderse
+  con ninguna operación. Con el libro **nada se guarda derivado** — ni las
+  unidades de cada activo, ni el costo promedio, ni el efectivo, ni el
+  resultado. Todo sale de recorrer los asientos en orden (`portfolio()`,
+  `wallet-model.ts`), así que cada número se puede seguir hasta la operación que
+  lo produjo y es **imposible** que un total y su detalle se desincronicen.
+  El detalle completo está en la sección de
+  [`wallets`](#walletswalletid-y-walletmovementsmovementid).
+- **La venta es el caso que le da sentido al modelo.** No hay que "acreditar"
+  la plata en ningún lado: el efectivo *es* la suma de la columna `cashAmount`
+  del libro, así que asentar la venta ya lo deja disponible. El composer de
+  venta no deja tipear el activo —lo elige de las tenencias reales, con su
+  cantidad disponible y un atajo "Vender todo"— y muestra antes de guardar qué
+  resultado va a realizar y con cuánto efectivo va a quedar la cartera. El tope
+  que valida el server (`heldQuantity`) sale del **mismo** `portfolio()` que
+  dibuja la pantalla, así que nunca ofrece vender algo que después rebota.
+- **Costo promedio ponderado** para el costo de lo que queda en cartera, y
+  resultado **realizado vs. sin realizar** separados en la UI: son dos números
+  distintos (uno ya es plata, el otro es lo que valdría si vendiera hoy) y
+  mezclarlos escondería justamente lo que uno quiere ver después de vender.
+- **Los asientos no se editan, sólo se borran** (`deleteTradeAction`). Borrar
+  puede dejar una venta sin la compra que la respalde: el fold clampea en cero
+  y marca la tenencia como inconsistente para que la pantalla lo avise, en vez
+  de bloquear el borrado.
+- **Una sola acción para las seis operaciones** (`recordTradeAction`): todas
+  escriben el mismo documento y la diferencia está en qué campos exige cada
+  una, que es exactamente lo que dice el registro `TRADE_KINDS`
+  (`movesAsset`, `cashSign`). El signo del efectivo lo pone el server, nunca el
+  cliente.
+- **Las cotizaciones se mudaron a `wallets.quotes`** (mapa símbolo → precio +
+  fecha), con escritura por ruta de campo (`quotes.AAPL`) — atómica por
+  símbolo, misma mecánica que `HabitDoc.actionDoneDates`. Por eso el símbolo no
+  puede tener puntos. `setQuoteAction` sigue siendo el enganche de la API de
+  cotizaciones, ahora todavía más limpio: escribe una sola clave y no toca el
+  libro.
+
+**Verificación de la aritmética.** El invariante que tiene que cerrar es
+`aportado + resultado total = valor de la cartera`. Con depósito de $1.000,
+compra de 10 AAPL a $50, venta de 4 a $80 y cotización a $90:
+
+| | |
+|---|---|
+| Efectivo sin invertir | $820 |
+| Tenencia | 6 AAPL, costo $300 (promedio $50) |
+| Valor de mercado | $540 |
+| Resultado realizado | +$120 |
+| Sin realizar | +$240 |
+| **Valor de la cartera** | **$1.360** |
+| Aportado | $1.000 · resultado total +$360 (+36,0%) |
+
+`1.000 + 360 = 1.360` ✓ — y vender el resto a $90 deja el valor en $1.360
+igual, que es lo correcto: vender a precio de mercado no cambia lo que tenés.
+
+**`firestore.rules` — bloque a agregar** (ya aplicado), reemplazando al de
+`walletPositions`. Las cotizaciones no necesitan match propio: viven en un mapa
+dentro del documento de la billetera, ya cubierto por el bloque de `wallets`.
+
+```
+match /walletTrades/{tradeId} {
+  allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+  allow write: if false;
+}
+```
+
+`firestore.indexes.json` no necesita cambios: las consultas del libro son
+equality-only sobre `ownerId` o `walletId`.
+
+```mermaid
+flowchart LR
+    T[("walletTrades<br/>el libro")] --> F["portfolio()<br/>recorre en orden"]
+    Q[("wallets.quotes<br/>precio por símbolo")] --> F
+    F --> C["Efectivo sin invertir<br/>Σ cashAmount"]
+    F --> H["Tenencias<br/>cantidad · costo promedio"]
+    F --> R["Realizado<br/>ventas − costo"]
+    F --> U["Sin realizar<br/>valor − costo"]
+    C --> V["Valor de la cartera"]
+    H --> V
+    API["API de cotizaciones<br/>(todavía no existe)"] -. "escribirá quotes.SÍMBOLO" .-> Q
+```
+
+- **Fuera de alcance a propósito**: sin FIFO ni lotes (es promedio ponderado),
+  sin historial de precios (`quotes` guarda el último, no una serie), sin
+  transferencias entre billeteras, sin cálculo impositivo, y el efectivo de una
+  cartera no se puede mover a una billetera de gastos — se retira y se carga
+  del otro lado.
+
+### 2026-08-11 — Billetera: tipo de perfil, moneda y carteras de inversión
+
+**Qué cambió.** Una billetera ahora tiene **tipo** y **moneda**, y las de tipo
+inversión llevan **posiciones** en vez de movimientos: qué activo, cuándo entró,
+cuántas unidades y a qué precio — con el rendimiento ya calculado y el enganche
+listo para una API de cotizaciones.
+
+**Colección nueva**: `walletPositions`. **Campos nuevos** en `WalletDoc`:
+`kind`, `currency`, `creditLimit`. Las billeteras que ya existían no traen
+ninguno y se leen con defaults (`kind: "gastos"`, `currency: "ARS"`,
+`creditLimit: null`), que es exactamente lo que eran — no hace falta migrar.
+
+- **Cuatro tipos, un registro** (`WALLET_KINDS`, `src/lib/wallet-model.ts`):
+
+  | `kind` | Qué lleva | Su número principal |
+  |---|---|---|
+  | `gastos` | movimientos | Saldo |
+  | `ahorro` | movimientos + meta | Ahorrado |
+  | `credito` | movimientos + límite | **Deuda** (saldo invertido) |
+  | `inversion` | **posiciones** | Valor actual |
+
+  El registro expone dos banderas, `usesPositions` e `isDebt`, y de ahí cuelga
+  todo: qué se puede cargar, qué totales se calculan y qué muestra cada card.
+  `walletHeadline`/`walletProgress` traducen eso a "qué número y con qué
+  nombre", así que la grilla, el detalle y el carrusel de Inicio dicen lo mismo
+  sin coordinarse. Ver la decisión completa en la sección de
+  [`wallets`](#walletswalletid-y-walletmovementsmovementid).
+- **`credito` invierte el signo al mostrar, no al guardar**: un consumo se
+  guarda como movimiento negativo igual que un gasto, y la UI lo lee como
+  "Deuda: $5.000". Sus botones dicen "Consumo"/"Pago" en vez de
+  "Gasto"/"Ingreso" — misma escritura, otro nombre.
+- **Moneda por billetera** (`ARS`/`USD`/`EUR`/`BRL`/`USDT`), con
+  `formatAmount`/`formatSignedAmount` nuevos en `wallet-model.ts`. Armados a
+  mano sobre `toLocaleString` como `formatMoney`, nunca con
+  `Intl.NumberFormat(style: "currency")` — su símbolo varía entre Node y el
+  browser y eso es un mismatch de hidratación. **Nunca se suman dos monedas**:
+  se sacó el total de la grilla, porque sumar pesos con dólares exige una
+  cotización que todavía no existe.
+- **Tipo y moneda son inmutables después del alta.** No es sólo que la UI los
+  esconda al editar: `updateWalletAction` no los incluye en el `update` y
+  valida el resto de los campos contra el `kind` **guardado**. Los motivos
+  están en la sección de la colección; en corto, cambiarlos resignifica datos
+  ya cargados.
+- **Posiciones de inversión** (`walletPositions`): colección propia y no
+  movimientos con campos extra — una posición tiene cantidad × precio, se
+  ordena por fecha de ingreso y su valor cambia sin que nadie escriba nada.
+  Son la **única forma del repo con decimales** (media acción, 0.0031 BTC), así
+  que su composer usa un `Input` numérico y no `AmountInput`, que redondea a
+  entero.
+- **El enganche de la API de cotizaciones ya está dibujado.**
+  `currentPrice`/`currentPriceAt` hoy los escribe el usuario a mano con
+  `setPositionPriceAction` — una acción chica y separada del alta a propósito,
+  porque es exactamente la escritura que va a hacer la integración cuando
+  exista (buscar por `assetSymbol`, escribir precio y fecha).
+  `positionReturn`/`investmentTotals` ya derivan el rendimiento de esos campos
+  sin importar quién los puso, así que enchufar la API no toca ningún cálculo
+  ni ninguna pantalla. Sin precio no se inventa un valor: la posición vale lo
+  que costó y la UI dice "sin cotización" en vez de un 0%.
+- **Guardas del lado del server, no sólo en la UI**: `addWalletMovementAction`
+  rechaza cargar movimientos en una billetera de inversión y
+  `upsertWalletPositionAction` rechaza posiciones en una que no lo sea. La UI
+  ni siquiera ofrece los botones, pero una Server Action es un endpoint
+  público. Los campos que no aplican al tipo (`targetAmount` en crédito,
+  `initialBalance` en inversión) se guardan en su valor neutro en vez de lo que
+  mande el cliente.
+- **El borrado en cascada de una billetera** ahora limpia las dos colecciones
+  hijas, y el módulo `billetera` de Ajustes suma `walletPositions`.
+
+**`firestore.rules` — bloque a agregar** (ya aplicado). Los campos nuevos de
+`wallets` no necesitan nada: la colección ya tiene su bloque y el cliente sigue
+sin poder escribir. La colección nueva sí:
+
+```
+match /walletPositions/{positionId} {
+  allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+  allow write: if false;
+}
+```
+
+Queda cerrada a escritura **también** pensando en la API de cotizaciones: ese
+job va a correr en el server con el Admin SDK, que saltea las reglas igual que
+las Server Actions, así que no hay ningún caso en que el browser necesite
+escribir acá.
+
+`firestore.indexes.json` no necesita cambios: las consultas nuevas son
+equality-only sobre `ownerId` o `walletId`, que Firestore resuelve con los
+índices de campo único que crea solo.
+
+```mermaid
+flowchart TD
+    W["wallets/{id}<br/>kind + currency"] --> K{kind}
+    K -->|gastos / ahorro / credito| M[(walletMovements)]
+    K -->|inversion| P[(walletPositions)]
+    M --> T["walletTotals()<br/>saldo = inicial + ingresos − gastos"]
+    P --> I["investmentTotals()<br/>invertido / valor / rendimiento"]
+    T --> H["walletHeadline()"]
+    I --> H
+    H --> UI["Grilla · Detalle · Carrusel de Inicio<br/>(las tres muestran lo mismo)"]
+    API["API de cotizaciones<br/>(todavía no existe)"] -. "escribirá currentPrice<br/>por assetSymbol" .-> P
+```
+
+- **Fuera de alcance a propósito**: no hay conversión entre monedas ni un
+  patrimonio total consolidado (haría falta la misma cotización que falta), no
+  se registran ventas ni cierres parciales de una posición (sólo alta, edición
+  y borrado), no hay historial de precios —`currentPrice` guarda el último, no
+  una serie— y no hay fecha de cierre/vencimiento en las billeteras de crédito.
+
+### 2026-08-11 — Inicio: carrusel de accesos directos a billeteras
+
+**Qué cambió.** El Resumen de Inicio muestra un carrusel horizontal con las
+billeteras que el usuario elija fijar; tocar una entra derecho a esa billetera
+dentro de la mini-app, con su detalle ya abierto.
+
+**Un campo nuevo, ninguna colección nueva**: `WalletDoc.pinnedToHome`
+(`boolean`). Las billeteras creadas antes no lo tienen y se leen con `?? false`
+(`getWallets`) — no hace falta migrar nada.
+
+- **Se eligen una por una, no aparecen todas.** El carrusel abre un sheet
+  (`HomeWalletsSheet`) con un `Switch` por billetera, que guarda al instante con
+  `toggleWalletHomePinAction` y pintado optimista (mismo patrón que
+  `PinLockSwitch`). El mismo switch está también en el detalle de la billetera
+  dentro de la mini-app ("Mostrar en Inicio"), porque es donde el usuario ya
+  está parado cuando se le ocurre fijarla. El Resumen es un índice: doce cards
+  de billetera lo volverían la pantalla de otra cosa.
+- **Por qué `pinnedToHome` y no un array tipo `favorites/{uid}`**: ver la
+  decisión de diseño en la sección de
+  [`wallets`](#walletswalletid-y-walletmovementsmovementid). En corto: se
+  prende de a una, y un array obligaría a un read-modify-write que dos
+  dispositivos se pisarían.
+- **Inicio no se trae toda la mini-app.** `getWalletShortcuts` (nuevo, en
+  `lib/data/wallets.ts`) devuelve *todas* las billeteras (≤ 12 documentos, para
+  el selector) y los movimientos **sólo de las fijadas**, con un `in` sobre sus
+  ids. Inicio muestra el saldo, no el detalle: traer los movimientos de las que
+  no están en el carrusel sería pagar lecturas por documentos que nadie mira.
+  Sin ninguna fijada no hace ni esa consulta. Entra al `Promise.all` de
+  `getHomeData` junto al resto.
+- **El deep link es un query param, no una ruta**:
+  `/mini-apps/billetera?billetera={id}` (`walletDetailHref`, `app-config.ts`).
+  El detalle de una billetera **no es una pantalla**: es un modal sobre la tab
+  "Billeteras", que necesita el resto de la mini-app montada detrás — una ruta
+  propia obligaría a duplicar la pantalla entera sólo para abrir un modal. Es
+  la diferencia con `/inicio/periodos/{cycleId}`, que sí es una pantalla
+  completa y por eso sí tiene ruta.
+
+  La página lo lee de `searchParams` (que en esta versión de Next es una
+  Promise: es una Request-time API) y lo baja como prop, igual que `today` —
+  el cliente no vuelve a leer la URL por su cuenta. `WalletApp` lo valida
+  contra las billeteras que ya tiene, mueve la tab del shell a "Billeteras" y
+  **limpia el query param** con `router.replace`: el deep link es de un solo
+  uso, y dejarlo puesto haría que volver a esa tab reabriera el detalle.
+  `WalletsPanel` ya lo latcheó como estado inicial perezoso, así que limpiar la
+  URL no cierra el modal.
+- **Todas las acciones de billeteras revalidan también `/inicio`**
+  (`revalidateWalletScreens`): el carrusel muestra nombre, color y saldo, así
+  que cargar un movimiento, editar o borrar una billetera lo desactualiza tanto
+  como a la mini-app.
+- **Scroll horizontal con `snap`, no el `Carousel` de la librería**: ese
+  componente es un visor de imágenes con flechas y dots. Se reusa la misma
+  mecánica del carrusel de "Períodos anteriores"
+  (`flex snap-x snap-mandatory gap-3 overflow-x-auto` + cards
+  `shrink-0 snap-start`). La última card de la fila es un "+" que abre el
+  selector, en vez de un botón aparte.
+
+**`firestore.rules` no necesita ningún cambio.** `pinnedToHome` es un campo más
+de un documento de una colección que ya tiene su bloque, y el cliente sigue sin
+poder escribir nada — el toggle pasa por una Server Action con el Admin SDK. El
+bloque vigente (sin cambios) es:
+
+```
+match /wallets/{walletId} {
+  allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+  allow write: if false;
+}
+```
+
+`firestore.indexes.json` tampoco: el `in` de `getWalletShortcuts` es sobre un
+solo campo (`walletId`), que Firestore resuelve con el índice de campo único
+que crea solo.
+
+```mermaid
+sequenceDiagram
+    participant H as Inicio (HomeWalletsCarousel)
+    participant W as /mini-apps/billetera
+    participant SH as AppShell (tabs)
+    participant P as WalletsPanel
+
+    H->>W: Link a ?billetera={id}
+    W->>W: await searchParams → initialWalletId
+    W->>SH: setTab("billeteras")
+    W->>W: router.replace(/mini-apps/billetera)
+    SH->>P: monta con openWalletId={id}
+    P->>P: useState(() => openWalletId) — modal abierto
+    Note over P: cerrar el modal no lo reabre:<br/>el id era sólo el valor inicial
+```
+
+- **Fuera de alcance a propósito**: el orden del carrusel no es manual (sigue
+  el `createdAt`, igual que la grilla), y no hay un tope propio de accesos
+  directos más allá del de 12 billeteras.
+
+### 2026-08-11 — Mini-app Billetera: el gestor de gastos + varias billeteras
+
+**Qué cambió.** Nueva mini-app privada **Billetera**
+(`/mini-apps/billetera`, `MiniApp.id` = `billetera`), pensada como *extensión*
+del módulo de gastos: en una tab muestra el gestor de gastos por período de
+siempre, y en la otra deja crear varias billeteras, cada una encargada de una
+cosa distinta ("Ahorro auto", "Casa", "Viaje"), con su saldo y sus movimientos.
+
+Dos colecciones nuevas — `wallets` y `walletMovements` — y **ningún cambio en
+la forma** de `expenseCycles`/`expenseMovements`/`expenseCategories`.
+
+- **La tab "Principal" no es una copia: es el mismo componente.** `WalletApp`
+  (`src/components/organisms/mini-apps/WalletApp.tsx`) renderiza el
+  `MovementsPanel` de `organisms/home` tal cual, con los mismos datos que le
+  pasa Inicio (`getActiveExpenseCycle` + `getExpenseMovements` +
+  `getExpenseCategories`). Es lo que la nota vieja de
+  `expenseCycles`/`expenseMovements` anticipaba —*"las dos colecciones están
+  pensadas para que una mini-app de gastos aparte, más adelante, las lea/escriba
+  igual"*—: el gestor de gastos por período sigue siendo **uno solo**, y ahora
+  se ve desde dos pantallas.
+- **Las billeteras van en colecciones propias**, no como un `walletId` opcional
+  en `expenseMovements`: ver la decisión de diseño completa en la sección
+  [`wallets`/`walletMovements`](#walletswalletid-y-walletmovementsmovementid).
+  El motivo corto es el borrado por módulo de Ajustes —que borra por `ownerId`—
+  y no tener que volver `cycleId` nullable en toda la colección existente.
+- **Lo que sí se comparte con el gestor de gastos**: el ABM de categorías
+  (`expenseCategories/{uid}`, el mismo documento — una billetera no tiene
+  categorías propias), el tipo `Movement` (`lib/data/home.ts`, al que se le
+  sumó un `walletId?` opcional), el componente `MovementsList` y `formatMoney`/
+  `byDayDesc` de `home-model.ts`.
+- **`MovementsList` ganó un `onDelete` opcional**, que dibuja un botón de
+  borrado por fila. Sin la prop la lista queda igual que antes (sólo lectura,
+  que es como la usa el gestor de gastos: un movimiento de un ciclo no se
+  borra); el detalle de una billetera sí la pasa.
+- **Dos candados de PinLock distintos, a propósito.** La página monta un
+  `ModuleLockGate` con `moduleId: "billetera"` que tapa la mini-app entera, y
+  adentro la tab "Principal" sigue mostrando el switch del módulo
+  `movimientos` (el suyo, el de Inicio) en su sheet de ajustes. Son dos
+  módulos distintos en `UserPreferences.lockedModules`: bloquear la mini-app no
+  bloquea la tab de Inicio ni al revés.
+- **Ajustes → "Borrar datos"** suma la entrada `billetera` a
+  `RESETTABLE_MODULES` con **sólo** `wallets` + `walletMovements`. Restablecer
+  las billeteras no toca el período en curso del módulo `movimientos`, y
+  viceversa — que es justamente lo que una colección compartida habría roto.
+- **`nav-config`** suma `WALLET_TABS` (`principal` / `billeteras`, tipadas con
+  `WalletTab` igual que `HOME_TABS`/`WORKOUT_TABS`) y la entrada de
+  `SCREEN_HEADERS` con `back: true`. Sin `searchable`: hasta 12 billeteras
+  entran en una grilla sin necesitar buscador.
+
+**`firestore.rules` — bloques a agregar** (ya aplicados). Mismo criterio que
+todo el resto del repo: el cliente lee lo suyo, y no escribe nada — todas las
+escrituras pasan por Server Actions con el Admin SDK, que saltea las reglas.
+`walletMovements` duplica el `ownerId` de su billetera justamente para que la
+regla no necesite un `get()` del documento padre:
+
+```
+match /wallets/{walletId} {
+  allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+  allow write: if false;
+}
+
+match /walletMovements/{movementId} {
+  allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+  allow write: if false;
+}
+```
+
+`firestore.indexes.json` **no necesita cambios**: las dos consultas nuevas son
+equality-only sobre `ownerId` (y `walletId` en el borrado en cascada), que
+Firestore resuelve con los índices de campo único que crea solo.
+
+```mermaid
+flowchart TD
+    P["/mini-apps/billetera<br/>(page.tsx)"] --> G["ModuleLockGate<br/>moduleId: billetera"]
+    G --> A[WalletApp]
+    A -->|tab: principal| M["MovementsPanel<br/>(el mismo de Inicio)"]
+    A -->|tab: billeteras| W[WalletsPanel]
+    M --> EC[(expenseCycles)]
+    M --> EM[(expenseMovements)]
+    W --> WA[(wallets)]
+    W --> WM[(walletMovements)]
+    M --> CAT[(expenseCategories)]
+    W --> CAT
+```
+
+- **Fuera de alcance a propósito** (base para las próximas instrucciones): no
+  hay transferencias entre billeteras ni entre una billetera y el período,
+  ni orden manual de la grilla (se ordena por `createdAt`), ni archivado —
+  una billetera se borra, no se guarda como historial—, ni edición de un
+  movimiento ya cargado (sólo alta y borrado), ni notificaciones propias (el
+  aviso de umbral del tope sigue siendo sólo del gestor de gastos).
 
 ### 2026-08-08 — Ajustes: borrar los datos de un módulo/mini-app puntual
 

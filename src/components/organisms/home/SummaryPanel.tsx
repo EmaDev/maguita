@@ -10,6 +10,7 @@ import {
 import { SummaryCard } from "@/components/molecules/SummaryCard";
 import type { Habit, Movement, Note } from "@/lib/data/home";
 import type { ExpenseCycle } from "@/lib/data/expenses";
+import type { WalletShortcuts } from "@/lib/data/wallets";
 import {
   expenseCycleProgress,
   formatDay,
@@ -17,6 +18,7 @@ import {
   formatSignedMoney,
   habitsToday,
 } from "@/lib/home-model";
+import { HomeWalletsCarousel } from "./HomeWalletsCarousel";
 import { MovementsList } from "./MovementsList";
 import type { HomeTab } from "./tabs";
 
@@ -33,6 +35,8 @@ interface SummaryPanelProps {
   expenseCycle: ExpenseCycle | null;
   notes: Note[];
   habits: Habit[];
+  /** Accesos directos a billeteras de la mini-app Billetera (ver `HomeWalletsCarousel`). */
+  walletShortcuts: WalletShortcuts;
   onGoTo: (tab: HomeTab) => void;
 }
 
@@ -42,6 +46,7 @@ export function SummaryPanel({
   expenseCycle,
   notes,
   habits,
+  walletShortcuts,
   onGoTo,
 }: SummaryPanelProps) {
   // `movements` ya son sólo los del ciclo activo del gestor de gastos (ver
@@ -133,6 +138,8 @@ export function SummaryPanel({
           />
         </div>
       </div>
+
+      <HomeWalletsCarousel shortcuts={walletShortcuts} />
 
       <Card variant="glass" padding="md">
         <CardHeader
