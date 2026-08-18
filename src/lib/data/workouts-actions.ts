@@ -33,7 +33,17 @@ const MAX_NAME_LENGTH = 60;
 const MAX_DESCRIPTION_LENGTH = 140;
 const MAX_DAY_TITLE_LENGTH = 60;
 const MAX_EXERCISE_NAME_LENGTH = 60;
-const MAX_EXERCISE_DETAIL_LENGTH = 40;
+
+/**
+ * El detalle de un ejercicio. Arrancó en 40, que alcanza para "4x10" o
+ * "20 min" — así se carga una rutina de gimnasio, donde el ejercicio es el
+ * nombre y el detalle son las series. Pero en CrossFit el contenido del bloque
+ * *vive* en el detalle: un metcon es "18 Shuttle run, 40 DB snatch alt, 12
+ * Burpees OTDB…" y no entra en un nombre de 60. 200 deja escribir un WOD
+ * completo sin que el campo se convierta en la nota del día, que ya tiene su
+ * lugar (`MAX_NOTE_LENGTH`) y su propósito (cómo *fue*, no qué *toca*).
+ */
+const MAX_EXERCISE_DETAIL_LENGTH = 200;
 const MAX_EXERCISES_PER_DAY = 30;
 const MAX_NOTE_LENGTH = 600;
 
@@ -80,6 +90,10 @@ export interface RoutineFieldsInput {
  * y el `name` ya viaja copiado, así que un id que no resuelve degrada la
  * fila a "sin ficha" en vez de romperla — que es exactamente lo que pasa
  * cuando el usuario borra un ejercicio propio que ya había usado.
+ *
+ * Los errores de largo nombran el ejercicio que se pasó: un día puede tener
+ * hasta 30 y por acá entra también el JSON importado, así que "algún ejercicio
+ * es muy largo" deja al usuario buscándolo a ojo entre 30 filas.
  */
 function normalizeExercises(exercises: WorkoutExerciseInput[]): WorkoutExerciseDoc[] {
   const normalized = exercises
@@ -96,10 +110,14 @@ function normalizeExercises(exercises: WorkoutExerciseInput[]): WorkoutExerciseD
   }
   for (const exercise of normalized) {
     if (exercise.name.length > MAX_EXERCISE_NAME_LENGTH) {
-      throw new Error(`Un ejercicio no puede tener más de ${MAX_EXERCISE_NAME_LENGTH} caracteres.`);
+      throw new Error(
+        `El nombre "${exercise.name.slice(0, 24)}…" tiene ${exercise.name.length} caracteres y el máximo es ${MAX_EXERCISE_NAME_LENGTH}.`
+      );
     }
-    if ((exercise.detail?.length ?? 0) > MAX_EXERCISE_DETAIL_LENGTH) {
-      throw new Error(`El detalle de un ejercicio no puede tener más de ${MAX_EXERCISE_DETAIL_LENGTH} caracteres.`);
+    if (exercise.detail && exercise.detail.length > MAX_EXERCISE_DETAIL_LENGTH) {
+      throw new Error(
+        `El detalle de "${exercise.name}" tiene ${exercise.detail.length} caracteres y el máximo es ${MAX_EXERCISE_DETAIL_LENGTH}.`
+      );
     }
   }
 

@@ -186,12 +186,17 @@ export function WorkoutSessionComposer({
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
             Lo que toca hoy
           </p>
-          <ul className="mt-2 space-y-1">
+          <ul className="mt-2 space-y-2">
             {plan.exercises.map((exercise) => (
-              <li key={exercise.id} className="flex justify-between gap-3 text-sm">
-                <span className="min-w-0 truncate">{exercise.name}</span>
+              /* Mismo envoltorio que `WorkoutRoutineCard` y por el mismo
+                 motivo: el detalle puede ser el bloque completo del día. */
+              <li
+                key={exercise.id}
+                className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm"
+              >
+                <span className="min-w-0">{exercise.name}</span>
                 {exercise.detail && (
-                  <span className="shrink-0 text-muted">{exercise.detail}</span>
+                  <span className="min-w-0 text-muted">{exercise.detail}</span>
                 )}
               </li>
             ))}

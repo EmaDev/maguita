@@ -111,7 +111,7 @@ export function WorkoutRoutineCard({
                   {day.exercises.length === 0 ? (
                     <p className="text-xs text-muted">Sin ejercicios cargados.</p>
                   ) : (
-                    <ul className="mt-0.5 space-y-0.5">
+                    <ul className="mt-0.5 space-y-1.5">
                       {day.exercises.map((exercise) => {
                         const withInfo = hasExerciseInfo(exercise.exerciseId);
                         return (
@@ -123,13 +123,20 @@ export function WorkoutRoutineCard({
                               // texto plano, sin cursor ni subrayado que
                               // prometan algo que no va a pasar.
                               onClick={() => withInfo && onShowExercise(exercise.exerciseId!)}
-                              className={`flex w-full justify-between gap-3 text-left ${
+                              // `flex-wrap` y no `shrink-0`: un detalle corto
+                              // ("4x10") sigue quedando a la derecha del
+                              // nombre, y uno largo (un WOD entero) baja a su
+                              // propio renglón y envuelve en vez de reventar la
+                              // fila. Sin `truncate`: con el detalle ya
+                              // envolviendo, cortar el nombre con puntitos sólo
+                              // esconde información que ahora cabe.
+                              className={`flex w-full flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-left ${
                                 withInfo ? "text-primary/90 underline decoration-dotted" : ""
                               }`}
                             >
-                              <span className="min-w-0 truncate">{exercise.name}</span>
+                              <span className="min-w-0">{exercise.name}</span>
                               {exercise.detail && (
-                                <span className="shrink-0 text-muted">{exercise.detail}</span>
+                                <span className="min-w-0 text-muted/80">{exercise.detail}</span>
                               )}
                             </button>
                           </li>

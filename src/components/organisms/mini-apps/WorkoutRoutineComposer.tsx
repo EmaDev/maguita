@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition, type ChangeEvent } from "react";
-import { Button, ChipCarousel, Input, useSnackbar } from "lib-kit-components";
+import { Button, ChipCarousel, Input, Textarea, useSnackbar } from "lib-kit-components";
 import { ArrowLeftIcon, PlusIcon, TrashIcon } from "@/components/atoms/icons";
 import {
   addRoutineAction,
@@ -20,7 +20,7 @@ const MAX_NAME_LENGTH = 60;
 const MAX_DESCRIPTION_LENGTH = 140;
 const MAX_DAY_TITLE_LENGTH = 60;
 const MAX_EXERCISE_NAME_LENGTH = 60;
-const MAX_EXERCISE_DETAIL_LENGTH = 40;
+const MAX_EXERCISE_DETAIL_LENGTH = 200;
 const MAX_EXERCISES_PER_DAY = 30;
 
 const DAY_LABELS: Record<number, string> = {
@@ -267,29 +267,36 @@ export function WorkoutRoutineComposer({
             }
           />
 
-          <div className="mt-3 space-y-2">
+          <div className="mt-3 space-y-3">
             {day.exercises.map((exercise, index) => (
-              <div key={exercise.id} className="flex items-center gap-2">
-                <Input
-                  placeholder={`Ejercicio ${index + 1}`}
-                  value={exercise.name}
-                  maxLength={MAX_EXERCISE_NAME_LENGTH}
-                  disabled={pending}
-                  className="flex-1"
-                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                    patchExercise(day, exercise.id, { name: e.target.value })
-                  }
-                />
-                <Input
-                  placeholder="4x10"
-                  value={exercise.detail ?? ""}
-                  maxLength={MAX_EXERCISE_DETAIL_LENGTH}
-                  disabled={pending}
-                  className="w-24 shrink-0"
-                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                    patchExercise(day, exercise.id, { detail: e.target.value })
-                  }
-                />
+              /* El detalle va **debajo** del nombre, no al lado: entra un WOD
+                 entero (`MAX_EXERCISE_DETAIL_LENGTH`) y en una columna angosta
+                 se leería de a tres palabras. `autoResize` con `rows={1}` lo
+                 deja del alto de un input mientras diga "4x10" —el caso de
+                 gimnasio— y lo estira solo cuando hay un bloque escrito. */
+              <div key={exercise.id} className="flex items-start gap-2">
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <Input
+                    placeholder={`Ejercicio ${index + 1}`}
+                    value={exercise.name}
+                    maxLength={MAX_EXERCISE_NAME_LENGTH}
+                    disabled={pending}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                      patchExercise(day, exercise.id, { name: e.target.value })
+                    }
+                  />
+                  <Textarea
+                    placeholder="4x10, 20 min, o el bloque completo"
+                    value={exercise.detail ?? ""}
+                    rows={1}
+                    autoResize
+                    maxLength={MAX_EXERCISE_DETAIL_LENGTH}
+                    disabled={pending}
+                    onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
+                      patchExercise(day, exercise.id, { detail: e.target.value })
+                    }
+                  />
+                </div>
                 <Button
                   size="icon"
                   variant="ghost"

@@ -166,7 +166,7 @@ erDiagram
         string name "ej. Full body 3 días"
         string type "gimnasio | crossfit | aire-libre | casa | funcional | otro"
         string description "nullable, bajada libre y corta"
-        WorkoutDayDoc_array days "weekday (0-6, único), title y exercises (name, detail, exerciseId)"
+        WorkoutDayDoc_array days "weekday (0-6, único), title y exercises (name 60, detail 200, exerciseId)"
         boolean active "sólo una por cuenta, garantizado por transacción"
         timestamp createdAt
         timestamp updatedAt
@@ -979,7 +979,7 @@ cuando el usuario cambia de plan, que es justo cuando no se quiere perder.
 | `type` | `WorkoutType` | `gimnasio`/`crossfit`/`aire-libre`/`casa`/`funcional`/`otro`. Lista cerrada, registro en `src/lib/workout-model.ts` |
 | `description` | `string \| null` | bajada libre, máx. 140 caracteres |
 | `days` | `WorkoutDayDoc[]` | días de entrenamiento: `{ weekday, title, exercises }`. `weekday` es `Date.getDay()` (0=domingo…6=sábado) y es **único** dentro de la rutina; los días de descanso simplemente no tienen entrada. Ordenados arrancando el lunes. Máx. 7 |
-| `days[].exercises` | `WorkoutExerciseDoc[]` | `{ id, name, detail, exerciseId }`. `detail` es texto libre y corto ("4x10", "20 min"), `null` si no lo cargó. `exerciseId` apunta a la biblioteca (catálogo estático o `customExercises`) y es `null` si se escribió a mano. Máx. 30 por día |
+| `days[].exercises` | `WorkoutExerciseDoc[]` | `{ id, name, detail, exerciseId }`. `name` máx. 60 caracteres. `detail` es texto libre, `null` si no lo cargó: va desde las series ("4x10", "20 min") hasta el bloque completo de un WOD, máx. **200 caracteres** (ver el [Changelog](#changelog)). `exerciseId` apunta a la biblioteca (catálogo estático o `customExercises`) y es `null` si se escribió a mano. Máx. 30 por día |
 | `active` | `boolean` | rutina con la que se resuelve "qué toca hoy" y contra la que se mide la racha. **Sólo una `true` por cuenta**, garantizado por transacción |
 | `createdAt` / `updatedAt` | `Timestamp` | — |
 
@@ -1042,6 +1042,16 @@ Decisiones de diseño:
   entrenado es el día *local del usuario* y el server no conoce su huso. El
   calendario de "Registrar otro día" no deja elegir fechas futuras, pero eso
   es UI: el peor caso de saltearlo es que alguien se infle su propia racha.
+- **`detail` dice qué toca; la nota de la sesión dice cómo fue.** Los dos son
+  texto libre, y el tope es lo que los mantiene separados: 200 caracteres en
+  `days[].exercises[].detail` y 600 en `workoutSessions.note`. 200 alcanza para
+  las series de gimnasio ("4x10") y también para el bloque completo de un WOD
+  de CrossFit —que es donde vive el contenido real de un metcon, porque el
+  `name` es apenas el título del bloque— pero queda bien por debajo de la nota,
+  así el detalle no se convierte en el diario de entrenamiento y el historial
+  por día no queda vacío. Las vistas que lo muestran envuelven el detalle
+  (`flex-wrap`, sin `shrink-0`) en vez de reservarle una columna fija: uno
+  corto queda a la derecha del nombre, uno largo baja a su propio renglón.
 - **La importación es todo o nada.** `importRoutinesAction` parsea y valida
   todas las rutinas del JSON antes de escribir, y escribe en un `WriteBatch`:
   importar la mitad de un plan y dejar al usuario adivinando cuáles entraron
@@ -1410,6 +1420,77 @@ documento entero, campos nuevos incluidos — Firestore no tiene reglas a
 nivel de campo para lectura.
 
 ## Changelog
+
+### 2026-08-18 — Entrenamiento: el detalle de un ejercicio pasa de 40 a 200 caracteres
+
+**Qué cambió.** `workoutRoutines.days[].exercises[].detail` acepta hasta **200
+caracteres** (antes 40). No cambia ningún tipo ni se agrega ningún campo: es un
+tope que se afloja, así que **todo documento existente sigue siendo válido y no
+hay migración**.
+
+**Por qué.** El tope de 40 estaba dimensionado para el caso de gimnasio, donde
+el ejercicio es el nombre y el detalle son las series: `{ name: "Press banca",
+detail: "4x10" }`. En CrossFit el reparto es otro — el nombre es el *bloque*
+("Metcon / WOD (For Time)") y el contenido real vive en el detalle:
+
+| Disciplina | `name` | `detail` |
+|---|---|---|
+| Gimnasio | el ejercicio | las series — "4x10", "20 min" |
+| CrossFit | el bloque | los movimientos y las reps del bloque — 150 caracteres es normal |
+
+Importar un plan semanal de CrossFit rebotaba entero (la importación es todo o
+nada) porque 12 de sus 14 ejercicios tenían detalles de 41 a 150 caracteres.
+Meterlos en el `name` no era opción: tiene su propio tope de 60 y además el
+nombre es lo que `matchCatalogByName` cruza contra la biblioteca de ejercicios.
+
+- **200 y no más.** El límite ya no es el ancho de la UI (ver abajo) sino la
+  distinción entre los dos campos de texto libre de la mini-app: `detail` dice
+  qué **toca**, y `workoutSessions.note` (600) dice cómo **fue**. Sin un tope
+  bien por debajo del de la nota, `detail` se convierte en el diario de
+  entrenamiento y el historial por día queda vacío.
+- **El tope era, en parte, una decisión de layout — y esa parte se arregló.**
+  Las tres vistas que muestran `detail` lo ponían a la derecha del nombre con
+  `shrink-0`, o sea en una columna que no se podía comprimir: un detalle largo
+  reventaba la fila. Ahora el contenedor es `flex-wrap` sin `shrink-0`, así que
+  un `"4x10"` sigue quedando a la derecha —el caso de gimnasio no cambia de
+  aspecto— y un WOD entero baja a su propio renglón y envuelve. El composer
+  cambió el `Input` de `w-24` por un `Textarea` con `autoResize`.
+- **Los errores de largo ahora nombran el ejercicio.** `normalizeExercises`
+  tiraba "El detalle de un ejercicio no puede tener más de 40 caracteres" sin
+  decir cuál, y por acá entran hasta 30 ejercicios por día más el JSON
+  importado completo. Ahora dice el nombre y el largo real, como ya hacían los
+  errores de `parseRoutine`.
+
+```mermaid
+flowchart LR
+    subgraph escritura["Escritura — un solo validador"]
+        COMP["WorkoutRoutineComposer<br/>Textarea autoResize"]
+        IMP["WorkoutImportSheet<br/>JSON pegado"]
+        LIB["ExerciseLibrary<br/>+ AddToRoutineSheet"]
+        NORM{{"normalizeExercises()<br/>MAX_EXERCISE_DETAIL_LENGTH = 200"}}
+        COMP --> NORM
+        IMP -->|parseRoutine → detail / sets / reps| NORM
+        LIB --> NORM
+    end
+    NORM --> DOC[("workoutRoutines<br/>days[].exercises[].detail")]
+    DOC --> CARD["WorkoutRoutineCard<br/>flex-wrap"]
+    DOC --> SESS["WorkoutSessionComposer<br/>'Lo que toca hoy' — flex-wrap"]
+```
+
+**Reglas de Firestore: no hace falta cambiar nada.** El bloque de
+`workoutRoutines` sigue igual, y es justamente el que hace que el tope no
+necesite expresarse en las reglas: todas las escrituras pasan por Server
+Actions con el Admin SDK (que las saltea), así que la validación de forma vive
+entera en `normalizeRoutine`/`normalizeExercises` y las reglas sólo tienen que
+cerrarle la escritura al cliente.
+
+```
+    match /workoutRoutines/{routineId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+```
+
 
 ### 2026-08-11 — Carteras: libro de operaciones, ventas y efectivo sin invertir
 

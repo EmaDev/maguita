@@ -34,6 +34,11 @@ export const WORKOUT_TYPE_CHIPS: Chip[] = WORKOUT_TYPES.map((type) => ({
 /**
  * Ejemplo que muestra el sheet de importación. Es la documentación real del
  * formato: se puede copiar, pegar y editar sin salir de la app.
+ *
+ * El día del viernes trae el `detail` largo a propósito: es lo único que
+ * muestra que el detalle no está limitado a "4x10" y que un bloque de CrossFit
+ * entero es un valor válido. Sin un caso así en el ejemplo, el formato se lee
+ * como si sólo aceptara series por repeticiones.
  */
 export const IMPORT_EXAMPLE = `{
   "name": "Full body 3 días",
@@ -60,7 +65,12 @@ export const IMPORT_EXAMPLE = `{
     {
       "weekday": "viernes",
       "title": "Full body",
-      "exercises": [{ "name": "Circuito completo", "detail": "40 min" }]
+      "exercises": [
+        {
+          "name": "Metcon (For Time)",
+          "detail": "3 rondas: 15 burpees + 20 kettlebell swing + 400 m de trote"
+        }
+      ]
     }
   ]
 }`;
