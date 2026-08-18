@@ -1,59 +1,42 @@
-"use client";
-
-import { useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { Button, Card } from "lib-kit-components";
-import { CheckIcon, ChevronDownIcon, PencilIcon, ShareIcon, TrashIcon } from "@/components/atoms/icons";
+import Link from "next/link";
+import { Card } from "lib-kit-components";
+import { CheckIcon, ChevronRightIcon } from "@/components/atoms/icons";
+import { routineDetailHref } from "@/lib/app-config";
 import type { WorkoutRoutine } from "@/lib/data/workouts";
 import { workoutTypeMeta } from "@/lib/workout-model";
 import { WEEKDAY_INITIALS } from "./workout-options";
 
 interface WorkoutRoutineCardProps {
   routine: WorkoutRoutine;
-  pending: boolean;
-  /**
-   * `true` si ese `exerciseId` resuelve contra la biblioteca. Las filas
-   * escritas a mano (o las que apuntan a un ejercicio propio ya borrado) no
-   * tienen ficha que mostrar, así que no se pintan como tocables.
-   */
-  hasExerciseInfo: (exerciseId: string | null) => boolean;
-  /** Abre la ficha del ejercicio: descripción y consejos de ejecución. */
-  onShowExercise: (exerciseId: string) => void;
-  onActivate: (routine: WorkoutRoutine) => void;
-  onEdit: (routine: WorkoutRoutine) => void;
-  onExport: (routine: WorkoutRoutine) => void;
-  onRemove: (routine: WorkoutRoutine) => void;
 }
 
 /**
- * Una rutina de la lista: tipo, días que entrena y, desplegado, qué toca cada
- * día con sus ejercicios. Colapsada por default — la lista es para elegir
- * cuál activar, no para leer el plan entero (eso se lee en la card de "Hoy" y
- * al registrar el día).
+ * Una rutina en la lista: tipo, días que entrena y si está activa. Es un link
+ * al detalle (`/mini-apps/entrenamiento/rutinas/{id}`), no un acordeón.
+ *
+ * Antes desplegaba el plan entero acá adentro, y eso dejó de funcionar cuando
+ * `detail` pasó a aceptar un WOD completo en vez de "4x10": seis días con sus
+ * ejercicios y sus bloques, en el ancho de una fila de lista, es un muro de
+ * texto — y encima varias cards abiertas a la vez se leen como una sola. La
+ * lista volvió a ser lo que su nombre dice, y el plan se lee en la pantalla que
+ * tiene lugar para mostrarlo.
+ *
+ * Tampoco monta acciones: un `<button>` adentro de un `<a>` no es HTML válido,
+ * así que activar/editar/exportar/eliminar viven en el detalle. Al quedarse sin
+ * estado ni handlers ya no necesita la directiva `"use client"` — igual viaja
+ * en el bundle del cliente, porque quien la monta (`WorkoutRoutinesPanel`) sí
+ * es un Client Component; lo que se fue es la razón para declararla.
  */
-export function WorkoutRoutineCard({
-  routine,
-  pending,
-  hasExerciseInfo,
-  onShowExercise,
-  onActivate,
-  onEdit,
-  onExport,
-  onRemove,
-}: WorkoutRoutineCardProps) {
-  const [expanded, setExpanded] = useState(false);
+export function WorkoutRoutineCard({ routine }: WorkoutRoutineCardProps) {
   const type = workoutTypeMeta(routine.type);
   const trained = new Set(routine.days.map((day) => day.weekday));
 
   return (
     <Card variant="glass" padding="sm">
-      <div className="flex items-start gap-2">
-        <button
-          type="button"
-          className="min-w-0 flex-1 text-left"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((prev) => !prev)}
-        >
+      {/* Sin `aria-label`: pisaría el contenido del link, que ya dice el
+          nombre, el tipo, los días y si está activa. */}
+      <Link href={routineDetailHref(routine.id)} className="flex items-center gap-2">
+        <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="text-base" aria-hidden="true">
               {type.emoji}
@@ -67,7 +50,10 @@ export function WorkoutRoutineCard({
             )}
           </span>
 
-          <span className="mt-0.5 block text-xs text-muted">
+          {/* La descripción se corta en una línea: es una bajada, y dejarla
+              envolver era lo que descuadraba las filas de la lista. Completa se
+              ve en el detalle. */}
+          <span className="mt-0.5 block truncate text-xs text-muted">
             {type.label} · {routine.days.length}{" "}
             {routine.days.length === 1 ? "día" : "días"} por semana
             {routine.description && ` · ${routine.description}`}
@@ -85,110 +71,10 @@ export function WorkoutRoutineCard({
               </span>
             ))}
           </span>
-        </button>
+        </span>
 
-        <ChevronDownIcon
-          aria-hidden="true"
-          className={`mt-1 h-4 w-4 shrink-0 text-muted transition-transform ${
-            expanded ? "rotate-180" : ""
-          }`}
-        />
-      </div>
-
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
-            <ul className="mt-3 space-y-2.5">
-              {routine.days.map((day) => (
-                <li key={day.weekday}>
-                  <p className="text-xs font-semibold">{day.title}</p>
-                  {day.exercises.length === 0 ? (
-                    <p className="text-xs text-muted">Sin ejercicios cargados.</p>
-                  ) : (
-                    <ul className="mt-0.5 space-y-1.5">
-                      {day.exercises.map((exercise) => {
-                        const withInfo = hasExerciseInfo(exercise.exerciseId);
-                        return (
-                          <li key={exercise.id} className="text-xs text-muted">
-                            <button
-                              type="button"
-                              disabled={!withInfo}
-                              // Sin ficha no es un botón útil: se deja como
-                              // texto plano, sin cursor ni subrayado que
-                              // prometan algo que no va a pasar.
-                              onClick={() => withInfo && onShowExercise(exercise.exerciseId!)}
-                              // `flex-wrap` y no `shrink-0`: un detalle corto
-                              // ("4x10") sigue quedando a la derecha del
-                              // nombre, y uno largo (un WOD entero) baja a su
-                              // propio renglón y envuelve en vez de reventar la
-                              // fila. Sin `truncate`: con el detalle ya
-                              // envolviendo, cortar el nombre con puntitos sólo
-                              // esconde información que ahora cabe.
-                              className={`flex w-full flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-left ${
-                                withInfo ? "text-primary/90 underline decoration-dotted" : ""
-                              }`}
-                            >
-                              <span className="min-w-0">{exercise.name}</span>
-                              {exercise.detail && (
-                                <span className="min-w-0 text-muted/80">{exercise.detail}</span>
-                              )}
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </li>
-              ))}
-            </ul>
-
-            <div className="mt-3 flex items-center gap-1">
-              {!routine.active && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={pending}
-                  onClick={() => onActivate(routine)}
-                >
-                  Activar
-                </Button>
-              )}
-              <Button
-                size="icon"
-                variant="ghost"
-                aria-label={`Editar ${routine.name}`}
-                disabled={pending}
-                onClick={() => onEdit(routine)}
-              >
-                <PencilIcon className="h-4 w-4" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                aria-label={`Exportar ${routine.name} como JSON`}
-                onClick={() => onExport(routine)}
-              >
-                <ShareIcon className="h-4 w-4" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                aria-label={`Eliminar ${routine.name}`}
-                disabled={pending}
-                onClick={() => onRemove(routine)}
-              >
-                <TrashIcon className="h-4 w-4" />
-              </Button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        <ChevronRightIcon aria-hidden="true" className="h-4 w-4 shrink-0 text-muted" />
+      </Link>
     </Card>
   );
 }

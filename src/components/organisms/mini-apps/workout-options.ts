@@ -1,4 +1,5 @@
 import type { Chip } from "lib-kit-components";
+import type { WorkoutRoutine } from "@/lib/data/workouts";
 import { WEEK_ORDER, WORKOUT_TYPES } from "@/lib/workout-model";
 
 /**
@@ -20,6 +21,35 @@ export const WEEKDAY_CHIPS: Chip[] = [
   { id: "0", label: "Dom" },
 ];
 
+/**
+ * Nombre completo del día, indexado por `Date.getDay()`. Lo comparten el
+ * composer (que titula el bloque de cada día marcado) y el detalle de una
+ * rutina (que titula el panel de cada tab): estaba duplicado como constante
+ * local en el composer, y son dos vistas del **mismo** dato, así que acá sí
+ * conviene una sola fuente — a diferencia de los chips de día, que replican a
+ * propósito los de los hábitos.
+ */
+export const WEEKDAY_LABELS: Record<number, string> = {
+  0: "Domingo",
+  1: "Lunes",
+  2: "Martes",
+  3: "Miércoles",
+  4: "Jueves",
+  5: "Viernes",
+  6: "Sábado",
+};
+
+/** Abreviatura de tres letras, indexada por `Date.getDay()`. Para las tabs de día del detalle, donde "Miércoles" no entra. */
+export const WEEKDAY_SHORT: Record<number, string> = {
+  0: "Dom",
+  1: "Lun",
+  2: "Mar",
+  3: "Mié",
+  4: "Jue",
+  5: "Vie",
+  6: "Sáb",
+};
+
 /** Iniciales para la fila compacta de días de una card de rutina. */
 export const WEEKDAY_INITIALS: { weekday: number; label: string }[] = WEEK_ORDER.map(
   (weekday, index) => ({ weekday, label: ["L", "M", "M", "J", "V", "S", "D"][index]! })
@@ -30,6 +60,31 @@ export const WORKOUT_TYPE_CHIPS: Chip[] = WORKOUT_TYPES.map((type) => ({
   id: type.id,
   label: `${type.emoji} ${type.label}`,
 }));
+
+/**
+ * Forma exportable de una rutina: exactamente la que acepta la importación, así
+ * que el JSON que sale de una cuenta entra en otra sin editarlo. Por eso no
+ * incluye `id`, `active` ni `createdAt` — son de esta cuenta, no de la rutina.
+ */
+export function routineToJson(routine: WorkoutRoutine): string {
+  return JSON.stringify(
+    {
+      name: routine.name,
+      type: routine.type,
+      description: routine.description,
+      days: routine.days.map((day) => ({
+        weekday: day.weekday,
+        title: day.title,
+        exercises: day.exercises.map((exercise) => ({
+          name: exercise.name,
+          detail: exercise.detail,
+        })),
+      })),
+    },
+    null,
+    2
+  );
+}
 
 /**
  * Ejemplo que muestra el sheet de importación. Es la documentación real del

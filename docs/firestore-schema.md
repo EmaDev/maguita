@@ -995,8 +995,10 @@ cuando el usuario cambia de plan, que es justo cuando no se quiere perder.
 | `note` | `string \| null` | nota libre del día ("me costó, bajé el peso"). Máx. 600 caracteres |
 | `createdAt` / `updatedAt` | `Timestamp` | `createdAt` no se pisa al editar la nota de un día ya registrado |
 
-Accesores: `getWorkoutRoutines` / `getWorkoutSessions`
-(`src/lib/data/workouts.ts`, sólo Server Components); `addRoutineAction`,
+Accesores: `getWorkoutRoutines` / `getWorkoutRoutineById` /
+`getWorkoutSessions` (`src/lib/data/workouts.ts`, sólo Server Components —
+`getWorkoutRoutineById` verifica el dueño y devuelve `null` si la rutina es de
+otra cuenta, igual que `getExpenseCycleById`); `addRoutineAction`,
 `updateRoutineAction`, `activateRoutineAction`, `deleteRoutineAction`,
 `importRoutinesAction`, `addExercisesToRoutineDayAction`, `logWorkoutAction`,
 `deleteWorkoutAction` (`src/lib/data/workouts-actions.ts`, Server Actions —
@@ -1049,9 +1051,12 @@ Decisiones de diseño:
   de CrossFit —que es donde vive el contenido real de un metcon, porque el
   `name` es apenas el título del bloque— pero queda bien por debajo de la nota,
   así el detalle no se convierte en el diario de entrenamiento y el historial
-  por día no queda vacío. Las vistas que lo muestran envuelven el detalle
-  (`flex-wrap`, sin `shrink-0`) en vez de reservarle una columna fija: uno
-  corto queda a la derecha del nombre, uno largo baja a su propio renglón.
+  por día no queda vacío. El plan se lee en la **pantalla de detalle** de la
+  rutina (`/mini-apps/entrenamiento/rutinas/{routineId}`), una tab por día: la
+  lista de rutinas no da el ancho para un bloque de CrossFit. Ahí un detalle
+  largo se abre como lista de movimientos (`splitDetail`, heurística de
+  presentación sobre los separadores ` | ` / ` + ` / `, `) y uno corto
+  ("4x10") se sigue mostrando en una línea.
 - **La importación es todo o nada.** `importRoutinesAction` parsea y valida
   todas las rutinas del JSON antes de escribir, y escribe en un `WriteBatch`:
   importar la mitad de un plan y dejar al usuario adivinando cuáles entraron
@@ -1420,6 +1425,119 @@ documento entero, campos nuevos incluidos — Firestore no tiene reglas a
 nivel de campo para lectura.
 
 ## Changelog
+
+### 2026-08-18 — Entrenamiento: pantalla de detalle de una rutina, con una tab por día
+
+**Qué cambió.** Nada del esquema: ni colecciones, ni campos, ni tipos. Es una
+forma nueva de **leer** `workoutRoutines`, que hasta ahora sólo se veía
+desplegando la card de la lista.
+
+**Por qué.** El tope de `detail` subió a 200 caracteres más temprano hoy (ver la
+entrada de arriba), y eso rompió el lugar donde el plan se leía. La card de la
+lista mostraba los 4–7 días con todos sus ejercicios en el ancho de una fila:
+con detalles de "4x10" pasaba, con un metcon de 150 caracteres por ejercicio es
+un muro de texto — y con dos cards abiertas a la vez no se distingue dónde
+termina una rutina y empieza la otra. Subir el tope sin mover la lectura dejó la
+mini-app peor de lo que estaba.
+
+- **Nueva ruta dinámica `/mini-apps/entrenamiento/rutinas/{routineId}`**
+  (`src/app/(app)/mini-apps/entrenamiento/rutinas/[routineId]/page.tsx`).
+  Ruta propia y no un query param con modal como el detalle de una billetera:
+  acá **no hace falta la mini-app montada detrás**, es una pantalla de lectura
+  completa — mismo caso que el detalle de un período cerrado, y por eso mismo
+  criterio. Ya cubierta por sesión en dos capas: el prefijo
+  `/mini-apps/entrenamiento` de `PROTECTED_ROUTES` matchea por `startsWith`
+  (sin agregar nada al array) y `(app)/layout.tsx` llama `requireSession()` en
+  todo lo que cuelga de él. `headerFor` (`nav-config.tsx`) suma un `if` de
+  prefijo, como ya hacía con `/inicio/periodos/`.
+- **El candado del módulo se aplica también acá.** La página monta el mismo
+  `ModuleLockGate` que la principal. Sin eso, una ruta nueva del módulo es
+  exactamente la forma de saltear el PinLock: el gate no es del componente, es
+  del módulo.
+- **Nueva `getWorkoutRoutineById(userId, routineId)`** (`lib/data/workouts.ts`):
+  una rutina puntual, `null` tanto si no existe como si es de otra cuenta. La
+  página trata los dos casos igual (`notFound()`) para no delatar qué ids
+  existen. El chequeo de dueño va acá porque la lectura la hace el Admin SDK,
+  que saltea las reglas — misma barrera que en `getExpenseCycleById`. La
+  proyección del documento se extrajo a `toRoutine()` y ahora la comparten las
+  dos lecturas: son los `??` de compatibilidad (una rutina vieja sin
+  `exerciseId`) los que no conviene tener duplicados, o la misma rutina se vería
+  distinta según por dónde se entró.
+- **Las tabs de día las monta la pantalla, no el shell.** `SCREEN_HEADERS`
+  declara las tabs de cada ruta, pero el shell resuelve el header con
+  `usePathname` **antes** de que la pantalla lea sus datos, y las tabs de día
+  salen de la rutina (una por `days[].weekday`, entre 1 y 7). Así que el header
+  de esta ruta va sin `tabs` y `WorkoutRoutineScreen` monta su propio `Tabs`
+  (`scrollable`, para que 7 días entren igual que 3).
+- **Abre en el día de hoy** si la rutina entrena hoy, y si no en el primero de
+  la semana; la tab de hoy además va marcada. Abrir siempre en lunes obliga a
+  buscar la tab correcta todas las veces, y el día que se viene a leer es el que
+  toca.
+- **Las acciones de la rutina se mudaron de la lista al detalle**
+  (activar, editar, exportar, eliminar). No es una preferencia: la card pasó a
+  ser un `Link` entero, y un `<button>` adentro de un `<a>` no es HTML válido.
+  El costo es un toque más para activar; a cambio la decisión se toma después de
+  leer el plan. Eliminar navega con `router.replace` a la pantalla principal —
+  `replace` y no `push` para que volver no traiga un detalle que ahora es 404.
+  `WorkoutRoutineCard` quedó sin estado ni handlers y dejó de ser
+  `"use client"`.
+- **`splitDetail` (`lib/workout-model.ts`)**: parte un detalle largo en los
+  movimientos que lo componen para mostrarlo como lista. Es una heurística de
+  **presentación, no de datos** — `detail` es texto libre y no guarda ninguna
+  estructura, así que lo único posible es reconocer los separadores con los que
+  se escribe (` | `, ` + `, `, `, el primero que aparezca). Dos frenos para no
+  picar de más: los detalles de hasta 40 caracteres no se tocan (lo que antes
+  entraba en un renglón sigue en un renglón), y si el corte deja paréntesis o
+  corchetes sin cerrar se descarta y vuelve el texto entero — el caso de
+  `"3 rondas: (15 T2B / 30 K2E + 12 Burpees box jump overs + Front squats
+  [9 / 15 / 21 reps])"`, donde el `+` está *dentro* del paréntesis. Nada de esto
+  toca Firestore: el día que el modelo guarde los movimientos como array, la
+  función se borra.
+- **Revalidación: el detalle es otra entrada de caché.** Las acciones
+  invalidaban sólo `/mini-apps/entrenamiento`, que no alcanza a una ruta
+  distinta — editar una rutina desde su propio detalle habría dejado la pantalla
+  con la versión vieja. Nuevo helper `revalidateRoutines()`
+  (`workouts-actions.ts`) que invalida las dos, y se usa en las 6 acciones que
+  mutan rutinas. Invalida el **patrón** `[routineId]` y no la ruta de esa rutina
+  porque activar una apaga la que estaba activa, y el detalle de esa otra
+  también quedaría con el badge "Activa" de más. `logWorkoutAction` y
+  `deleteWorkoutAction` siguen invalidando sólo la principal a propósito: el
+  detalle muestra el plan, no el historial.
+- **`WEEKDAY_LABELS` / `WEEKDAY_SHORT` y `routineToJson` pasaron a
+  `workout-options.ts`.** Los nombres de día estaban duplicados como constante
+  local del composer, y `routineToJson` vivía dentro del panel: las dos las
+  necesita ahora el detalle, y las dos son del formato/presentación del módulo,
+  no de una pantalla.
+
+```mermaid
+flowchart TD
+    LIST["Tab Rutinas<br/>WorkoutRoutinesPanel"]
+    CARD["WorkoutRoutineCard<br/>nombre · tipo · días · Activa<br/>(Link, sin plan ni acciones)"]
+    DETAIL["/rutinas/{routineId}<br/>WorkoutRoutineScreen"]
+    GATE{{"ModuleLockGate<br/>entrenamiento"}}
+    TABS["Tabs por día (scrollable)<br/>abre en el día de hoy"]
+    PANEL["RoutineDayPanel<br/>ejercicios numerados<br/>detalle → splitDetail()"]
+    FICHA["ExerciseDetailModal<br/>si exerciseId resuelve"]
+
+    LIST --> CARD -->|routineDetailHref| GATE --> DETAIL
+    DETAIL --> TABS --> PANEL --> FICHA
+    DETAIL -->|activar / editar / exportar / eliminar| ACT["Server Actions<br/>revalidateRoutines()"]
+    ACT -.->|revalidatePath| DETAIL
+    ACT -.->|revalidatePath| LIST
+```
+
+**Reglas de Firestore: no hace falta cambiar nada.** La lectura nueva la hace un
+Server Component con el Admin SDK, que saltea `firestore.rules` — por eso el
+chequeo de dueño está en `getWorkoutRoutineById` y no en una regla. El bloque
+sigue igual, cerrado a la escritura del cliente:
+
+```
+    match /workoutRoutines/{routineId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+```
+
 
 ### 2026-08-18 — Entrenamiento: el detalle de un ejercicio pasa de 40 a 200 caracteres
 

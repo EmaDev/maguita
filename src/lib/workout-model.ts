@@ -76,6 +76,66 @@ export function parseWeekday(value: unknown): number | null {
 }
 
 /**
+ * Hasta acá el detalle de un ejercicio se muestra en una sola línea. Es el
+ * tope que `detail` tuvo históricamente, así que todo lo que ya se veía en un
+ * renglón ("4x10", "20 min", "6-5-4 Reps activación + 5x3") se sigue viendo
+ * igual, y sólo los detalles que se pasan de ahí —los bloques de CrossFit, que
+ * son los que llegaron con el tope nuevo de 200— se abren como lista.
+ */
+const COMPACT_DETAIL_LENGTH = 40;
+
+/**
+ * Separadores con los que se escribe un bloque de entrenamiento, del más
+ * fuerte al más débil. Se prueba uno por vez y gana el primero que aparezca:
+ * un detalle que ya usa `+` para separar movimientos suele tener comas
+ * *adentro* de cada movimiento, así que partirlo también por coma lo picaría
+ * de más.
+ */
+const DETAIL_SEPARATORS = [" | ", " + ", ", "];
+
+/** `true` si abren y cierran los mismos paréntesis y corchetes. */
+function balanced(text: string): boolean {
+  const count = (char: string) => text.split(char).length - 1;
+  return count("(") === count(")") && count("[") === count("]");
+}
+
+/**
+ * Parte el detalle de un ejercicio en los movimientos que lo componen, para
+ * poder mostrarlo como lista en vez de un párrafo corrido. Un solo elemento
+ * significa "mostralo tal cual".
+ *
+ * Es una heurística de **presentación, no de datos**: `detail` es texto libre y
+ * no guarda ninguna estructura, así que lo único que se puede hacer es
+ * reconocer los separadores con los que la gente lo escribe. Nada de esto
+ * cambia lo que hay en Firestore — el día que el modelo guarde los movimientos
+ * como array, esta función se borra.
+ *
+ * Dos frenos para no picar de más:
+ *
+ * - los detalles cortos no se tocan (`COMPACT_DETAIL_LENGTH`): partir
+ *   "6-5-4 Reps activación + 5x3" en dos renglones ocupa más y no aclara nada;
+ * - si el corte deja paréntesis o corchetes sin cerrar, se descarta y vuelve el
+ *   texto entero. Es el caso de "3 rondas: (15 T2B / 30 K2E + 12 Burpees box
+ *   jump overs + Front squats [9 / 15 / 21 reps])", donde el `+` está *dentro*
+ *   del paréntesis y cortarlo ahí parte la frase al medio.
+ */
+export function splitDetail(detail: string): string[] {
+  const text = detail.trim();
+  if (text.length <= COMPACT_DETAIL_LENGTH) return [text];
+
+  for (const separator of DETAIL_SEPARATORS) {
+    if (!text.includes(separator)) continue;
+    const parts = text
+      .split(separator)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (parts.length > 1 && parts.every(balanced)) return parts;
+  }
+
+  return [text];
+}
+
+/**
  * Orden de la semana arrancando el lunes, que es como se lee un plan de
  * entrenamiento — a diferencia de `Date.getDay()`, que arranca el domingo.
  */

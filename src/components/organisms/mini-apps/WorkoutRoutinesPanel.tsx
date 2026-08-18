@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState } from "react";
 import {
   AnimatedCounter,
   Button,
@@ -10,7 +10,6 @@ import {
   ProgressBar,
   StreakTracker,
   useHaptics,
-  useSnackbar,
 } from "lib-kit-components";
 import {
   CalendarIcon,
@@ -24,12 +23,8 @@ import {
 import { PinLockSwitch } from "@/components/molecules/PinLockSwitch";
 import { useAppSheet } from "@/components/shell/app-sheet";
 import { useShellSearch } from "@/components/shell/shell-search";
-import {
-  activateRoutineAction,
-  deleteRoutineAction,
-} from "@/lib/data/workouts-actions";
 import type { WorkoutRoutine, WorkoutSession } from "@/lib/data/workouts";
-import { mergeExercises, type ExerciseInfo } from "@/lib/exercise-catalog";
+import type { ExerciseInfo } from "@/lib/exercise-catalog";
 import { formatDay } from "@/lib/home-model";
 import {
   longestWorkoutStreak,
@@ -39,7 +34,6 @@ import {
   workoutTypeMeta,
   workoutWeekProgress,
 } from "@/lib/workout-model";
-import { ExerciseDetailModal } from "./ExerciseDetailModal";
 import { WorkoutImportSheet } from "./WorkoutImportSheet";
 import { WorkoutRoutineCard } from "./WorkoutRoutineCard";
 import { WorkoutRoutineComposer } from "./WorkoutRoutineComposer";
@@ -62,27 +56,6 @@ interface WorkoutRoutinesPanelProps {
   locked: boolean;
 }
 
-/** Forma exportable de una rutina: la misma que acepta la importación. */
-function routineToJson(routine: WorkoutRoutine): string {
-  return JSON.stringify(
-    {
-      name: routine.name,
-      type: routine.type,
-      description: routine.description,
-      days: routine.days.map((day) => ({
-        weekday: day.weekday,
-        title: day.title,
-        exercises: day.exercises.map((exercise) => ({
-          name: exercise.name,
-          detail: exercise.detail,
-        })),
-      })),
-    },
-    null,
-    2
-  );
-}
-
 /**
  * Tab "Rutinas": las rutinas del usuario (creadas a mano o importadas desde
  * JSON), qué toca hoy según la rutina activa, el registro del día con su
@@ -101,23 +74,11 @@ export function WorkoutRoutinesPanel({
   pinSet,
   locked,
 }: WorkoutRoutinesPanelProps) {
-  const { snack } = useSnackbar();
   const { haptic } = useHaptics();
   const { openSheet, closeSheet } = useAppSheet();
   const { query, setQuery } = useShellSearch();
-  const [pending, startTransition] = useTransition();
   const [celebration, setCelebration] = useState(0);
   const [showAllHistory, setShowAllHistory] = useState(false);
-  const [exerciseDetail, setExerciseDetail] = useState<ExerciseInfo | null>(null);
-
-  /**
-   * Biblioteca indexada por id, para resolver el `exerciseId` de cada fila de
-   * una rutina y poder abrir su ficha sin volver al tab de Ejercicios.
-   */
-  const exerciseById = useMemo(
-    () => new Map(mergeExercises(customExercises).map((exercise) => [exercise.id, exercise])),
-    [customExercises]
-  );
 
   /**
    * El buscador del header filtra la lista de rutinas por nombre, tipo, día
@@ -190,14 +151,11 @@ export function WorkoutRoutinesPanel({
     );
   }
 
-  function openRoutineSheet(routine?: WorkoutRoutine) {
+  /** Sólo el alta: editar una rutina existente se hace desde su detalle. */
+  function openNewRoutineSheet() {
     openSheet(
-      <WorkoutRoutineComposer
-        routine={routine}
-        customExercises={customExercises}
-        onSaved={closeSheet}
-      />,
-      { title: routine ? "Editar rutina" : "Nueva rutina" }
+      <WorkoutRoutineComposer customExercises={customExercises} onSaved={closeSheet} />,
+      { title: "Nueva rutina" }
     );
   }
 
@@ -206,64 +164,6 @@ export function WorkoutRoutinesPanel({
       title: "Importar rutina",
       description: "Desde un JSON.",
     });
-  }
-
-  function activate(routine: WorkoutRoutine) {
-    startTransition(async () => {
-      try {
-        await activateRoutineAction(routine.id);
-        snack({ message: `«${routine.name}» es tu rutina activa.`, variant: "success" });
-      } catch (error) {
-        snack({
-          message: error instanceof Error ? error.message : "No se pudo activar la rutina.",
-          variant: "error",
-        });
-      }
-    });
-  }
-
-  function remove(routine: WorkoutRoutine) {
-    startTransition(async () => {
-      try {
-        await deleteRoutineAction(routine.id);
-        snack({ message: "Rutina eliminada.", variant: "success" });
-      } catch (error) {
-        snack({
-          message: error instanceof Error ? error.message : "No se pudo eliminar la rutina.",
-          variant: "error",
-        });
-      }
-    });
-  }
-
-  /**
-   * Exporta al portapapeles en el mismo formato que acepta la importación,
-   * que es lo que hace que una rutina se pueda pasar de una cuenta a otra.
-   * `navigator.clipboard` no existe fuera de un contexto seguro (o si el
-   * usuario denegó el permiso): en ese caso se cae al sheet con el JSON a la
-   * vista para poder copiarlo a mano, en vez de fallar sin alternativa.
-   */
-  function exportRoutine(routine: WorkoutRoutine) {
-    const json = routineToJson(routine);
-
-    const showJson = () =>
-      openSheet(
-        <pre className="max-h-80 overflow-auto rounded-xl bg-surface-alt p-3 text-[11px] leading-relaxed">
-          {json}
-        </pre>,
-        { title: routine.name, description: "Copiá el JSON a mano." }
-      );
-
-    // `navigator.clipboard` es `undefined` fuera de un contexto seguro, así
-    // que se chequea antes de encadenar el `.then` en vez de con `?.`.
-    if (!navigator.clipboard) {
-      showJson();
-      return;
-    }
-    navigator.clipboard.writeText(json).then(
-      () => snack({ message: "JSON copiado al portapapeles.", variant: "success" }),
-      showJson
-    );
   }
 
   const visibleSessions = showAllHistory ? sessions : sessions.slice(0, HISTORY_PAGE);
@@ -376,7 +276,7 @@ export function WorkoutRoutinesPanel({
             <DownloadIcon className="h-4 w-4" />
             Importar
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => openRoutineSheet()}>
+          <Button size="sm" variant="ghost" onClick={() => openNewRoutineSheet()}>
             <PlusIcon className="h-4 w-4" />
             Nueva
           </Button>
@@ -388,7 +288,7 @@ export function WorkoutRoutinesPanel({
           status="empty"
           title="Todavía no tenés rutinas"
           description="Armá una con tus días y ejercicios, o importá un JSON que ya tengas."
-          primary={{ label: "Crear rutina", onClick: () => openRoutineSheet() }}
+          primary={{ label: "Crear rutina", onClick: () => openNewRoutineSheet() }}
           secondary={{ label: "Importar JSON", onClick: openImportSheet }}
         />
       ) : visibleRoutines.length === 0 ? (
@@ -399,21 +299,10 @@ export function WorkoutRoutinesPanel({
           </Button>
         </div>
       ) : (
-        <ul className="space-y-2.5" aria-busy={pending}>
+        <ul className="space-y-2.5">
           {visibleRoutines.map((routine) => (
             <li key={routine.id}>
-              <WorkoutRoutineCard
-                routine={routine}
-                pending={pending}
-                hasExerciseInfo={(exerciseId) => !!exerciseId && exerciseById.has(exerciseId)}
-                onShowExercise={(exerciseId) =>
-                  setExerciseDetail(exerciseById.get(exerciseId) ?? null)
-                }
-                onActivate={activate}
-                onEdit={openRoutineSheet}
-                onExport={exportRoutine}
-                onRemove={remove}
-              />
+              <WorkoutRoutineCard routine={routine} />
             </li>
           ))}
         </ul>
@@ -490,10 +379,6 @@ export function WorkoutRoutinesPanel({
           </div>
         </>
       )}
-
-      {/* Ficha del ejercicio abierta desde una rutina. Sin acciones de ABM:
-          crear, editar y borrar viven en la tab Ejercicios. */}
-      <ExerciseDetailModal exercise={exerciseDetail} onClose={() => setExerciseDetail(null)} />
     </div>
   );
 }

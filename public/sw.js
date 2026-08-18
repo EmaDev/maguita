@@ -1,12 +1,18 @@
 /* Service worker de Maguita.
  *
- * Bumpear CACHE_VERSION invalida todo lo cacheado: es lo que hace que
- * UpdatePrompt / useServiceWorker detecten "hay una versión nueva".
+ * La versión NO se escribe acá. Llega en el query string con el que lo registra
+ * el shell — `SW_URL` en `src/lib/app-config.ts`, o sea `/sw.js?v=<APP_VERSION>`
+ * — y de ahí salen los nombres de los caches. Así hay un solo número que tocar
+ * para publicar: bumpear `APP_VERSION` cambia la scriptURL del worker (el
+ * navegador lo trata como uno nuevo y lo deja en `waiting`, que es lo que hace
+ * aparecer el aviso de `UpdatePrompt`) y de paso invalida todo lo cacheado,
+ * porque `activate` borra las caches que no empiecen con esta `CACHE_VERSION`.
+ *
+ * El `?? "dev"` cubre a quien registre `/sw.js` pelado (DevTools, o una pestaña
+ * vieja anterior a este cambio): sigue funcionando, sólo que sin versionar.
  */
-// v3: el handler de `push` ahora avisa a las pestañas abiertas y mantiene el
-// badge del ícono. Un service worker viejo seguiría mostrando el aviso pero
-// dejaría la campana desactualizada hasta la próxima navegación.
-const CACHE_VERSION = "maguita-v3";
+const APP_VERSION = new URL(self.location.href).searchParams.get("v") ?? "dev";
+const CACHE_VERSION = `maguita-v${APP_VERSION}`;
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;

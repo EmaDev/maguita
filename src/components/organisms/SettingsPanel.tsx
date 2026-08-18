@@ -22,7 +22,7 @@ import { UserAvatar } from "@/components/molecules/UserAvatar";
 import { ThemeSegmented } from "@/components/organisms/ThemeToggle";
 import { PinSetupForm } from "@/components/organisms/security/PinSetupForm";
 import { ModuleResetCard } from "@/components/organisms/settings/ModuleResetCard";
-import { APP_NAME, APP_VERSION, ROUTES } from "@/lib/app-config";
+import { APP_NAME, APP_VERSION, ROUTES, SW_URL } from "@/lib/app-config";
 import type { CurrentUser } from "@/lib/auth/dal";
 import type { ResettableModuleInfo } from "@/lib/data/module-reset";
 
@@ -230,8 +230,9 @@ export function SettingsPanel({
               Diagnóstico
             </p>
             {/* observeOnly: el service worker ya lo registra UpdatePrompt desde el
-                shell, así que acá sólo lo miramos. */}
-            <PwaStatus swUrl="/sw.js" observeOnly title="Estado de la PWA" />
+                shell, así que acá sólo lo miramos. Misma `SW_URL` versionada que
+                usa el shell: con otra URL estaríamos mirando otro registro. */}
+            <PwaStatus swUrl={SW_URL} observeOnly title="Estado de la PWA" />
             {devTools && (
               <Button
                 variant="outline"

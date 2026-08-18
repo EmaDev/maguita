@@ -1,5 +1,12 @@
 import "server-only";
-import { COLLECTIONS, collection, withId, type WorkoutType } from "@/lib/firebase/collections";
+import {
+  COLLECTIONS,
+  collection,
+  withId,
+  type WithId,
+  type WorkoutRoutineDoc,
+  type WorkoutType,
+} from "@/lib/firebase/collections";
 
 /**
  * Rutinas y días entrenados de la mini-app privada de entrenamiento
@@ -46,6 +53,36 @@ export interface WorkoutSession {
 }
 
 /**
+ * Proyección del documento a `WorkoutRoutine`. Vive aparte porque la usan las
+ * dos lecturas —la lista y la rutina suelta del detalle— y son justo los
+ * `??` de compatibilidad los que no conviene tener duplicados: una rutina
+ * cargada antes de que existiera la biblioteca de ejercicios no trae
+ * `exerciseId`, y si sólo una de las dos lecturas lo cubre, la misma rutina se
+ * ve distinta según por dónde se entró.
+ */
+function toRoutine(data: WithId<WorkoutRoutineDoc>): WorkoutRoutine {
+  return {
+    id: data.id,
+    name: data.name,
+    type: data.type,
+    description: data.description ?? null,
+    days: (data.days ?? []).map((day) => ({
+      weekday: day.weekday,
+      title: day.title,
+      exercises: (day.exercises ?? []).map((exercise) => ({
+        id: exercise.id,
+        name: exercise.name,
+        detail: exercise.detail ?? null,
+        // `??` cubre las filas cargadas antes de que existiera la biblioteca.
+        exerciseId: exercise.exerciseId ?? null,
+      })),
+    })),
+    active: data.active ?? false,
+    createdAt: data.createdAt?.toMillis() ?? 0,
+  };
+}
+
+/**
  * Rutinas del usuario, la activa primero y después por antigüedad. Filtra
  * sólo por `ownerId` (equality) y ordena en memoria — mismo criterio que
  * `getLinks`/`getHabits`, evita pedirle a Firestore un índice compuesto.
@@ -56,27 +93,30 @@ export async function getWorkoutRoutines(userId: string): Promise<WorkoutRoutine
     .get();
 
   return snapshot.docs
-    .map((doc) => withId(doc))
-    .map((data) => ({
-      id: data.id,
-      name: data.name,
-      type: data.type,
-      description: data.description ?? null,
-      days: (data.days ?? []).map((day) => ({
-        weekday: day.weekday,
-        title: day.title,
-        exercises: (day.exercises ?? []).map((exercise) => ({
-          id: exercise.id,
-          name: exercise.name,
-          detail: exercise.detail ?? null,
-          // `??` cubre las filas cargadas antes de que existiera la biblioteca.
-          exerciseId: exercise.exerciseId ?? null,
-        })),
-      })),
-      active: data.active ?? false,
-      createdAt: data.createdAt?.toMillis() ?? 0,
-    }))
+    .map((doc) => toRoutine(withId(doc)))
     .sort((a, b) => Number(b.active) - Number(a.active) || a.createdAt - b.createdAt);
+}
+
+/**
+ * Una rutina puntual, para su pantalla de detalle
+ * (`/mini-apps/entrenamiento/rutinas/{routineId}`).
+ *
+ * Devuelve `null` tanto si el documento no existe como si es de otra cuenta,
+ * sin distinguir los dos casos — mismo criterio que `getExpenseCycleById`: los
+ * dos terminan en el mismo 404, y separarlos delataría qué ids existen.
+ *
+ * El chequeo de dueño va acá y no en las reglas de Firestore porque la lectura
+ * la hace el Admin SDK, que las saltea (ver `docs/firestore-schema.md`).
+ */
+export async function getWorkoutRoutineById(
+  userId: string,
+  routineId: string
+): Promise<WorkoutRoutine | null> {
+  const snapshot = await collection(COLLECTIONS.workoutRoutines).doc(routineId).get();
+  const data = snapshot.data();
+  if (!data || data.ownerId !== userId) return null;
+
+  return toRoutine({ ...data, id: snapshot.id });
 }
 
 /**

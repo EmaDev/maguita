@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
-import { ROUTES } from "@/lib/app-config";
+import { ROUTES, ROUTINE_DETAIL_PATTERN } from "@/lib/app-config";
 import { requireSession } from "@/lib/auth/dal";
 import { adminDb } from "@/lib/firebase/admin";
 import {
@@ -58,6 +58,27 @@ const MAX_IMPORT_LENGTH = 60_000;
 const MAX_IMPORT_ROUTINES = 10;
 
 const orNull = (value: string | null | undefined) => value?.trim() || null;
+
+/**
+ * Invalida las dos pantallas que muestran una rutina: la principal y el
+ * detalle (`/mini-apps/entrenamiento/rutinas/{routineId}`), que es una ruta
+ * aparte y por lo tanto una entrada de caché aparte — el `revalidatePath` de
+ * la principal no la alcanza. Sin esto, editar una rutina desde su propio
+ * detalle deja la pantalla mostrando la versión vieja.
+ *
+ * Invalida el patrón `[routineId]` entero y no `routineDetailHref(id)` porque
+ * hay escrituras que tocan **más de una** rutina: activar una apaga la que
+ * estaba activa, y el detalle de esa otra también quedaría con el badge
+ * "Activa" de más.
+ *
+ * Las acciones de días entrenados (`logWorkoutAction`,
+ * `deleteWorkoutAction`) siguen invalidando sólo la principal a propósito: el
+ * detalle muestra el plan, no el historial, así que marcar un día no lo cambia.
+ */
+function revalidateRoutines(): void {
+  revalidatePath(ROUTES.miniAppEntrenamiento);
+  revalidatePath(ROUTINE_DETAIL_PATTERN, "page");
+}
 
 export interface WorkoutExerciseInput {
   id: string;
@@ -216,7 +237,7 @@ export async function addRoutineAction(input: RoutineFieldsInput): Promise<void>
     updatedAt: now(),
   });
 
-  revalidatePath(ROUTES.miniAppEntrenamiento);
+  revalidateRoutines();
 }
 
 export interface UpdateRoutineInput extends RoutineFieldsInput {
@@ -234,7 +255,7 @@ export async function updateRoutineAction(input: UpdateRoutineInput): Promise<vo
   const { ref } = await getOwnedRoutine(input.id, session.sub);
   await ref.update({ ...fields, updatedAt: now() });
 
-  revalidatePath(ROUTES.miniAppEntrenamiento);
+  revalidateRoutines();
 }
 
 /**
@@ -264,7 +285,7 @@ export async function activateRoutineAction(routineId: string): Promise<void> {
     }
   });
 
-  revalidatePath(ROUTES.miniAppEntrenamiento);
+  revalidateRoutines();
 }
 
 /**
@@ -278,7 +299,7 @@ export async function deleteRoutineAction(routineId: string): Promise<void> {
   const session = await requireSession(ROUTES.miniAppEntrenamiento);
   const { ref } = await getOwnedRoutine(routineId, session.sub);
   await ref.delete();
-  revalidatePath(ROUTES.miniAppEntrenamiento);
+  revalidateRoutines();
 }
 
 /**
@@ -314,7 +335,7 @@ export async function addExercisesToRoutineDayAction(
   );
 
   await ref.update({ days: nextDays, updatedAt: now() });
-  revalidatePath(ROUTES.miniAppEntrenamiento);
+  revalidateRoutines();
 }
 
 /* ------------------------------------------------------------------ *
@@ -507,7 +528,7 @@ export async function importRoutinesAction(json: string): Promise<number> {
   });
   await batch.commit();
 
-  revalidatePath(ROUTES.miniAppEntrenamiento);
+  revalidateRoutines();
   return routines.length;
 }
 

@@ -37,7 +37,7 @@ import {
 } from "@/components/atoms/icons";
 import { UserAvatar } from "@/components/molecules/UserAvatar";
 import { useTheme } from "@/components/theme/ThemeProvider";
-import { APP_NAME, APP_TAGLINE, APP_VERSION, ROUTES } from "@/lib/app-config";
+import { APP_NAME, APP_TAGLINE, APP_VERSION, ROUTES, SW_URL } from "@/lib/app-config";
 import type { CurrentUser } from "@/lib/auth/dal";
 import {
   clearNotificationsAction,
@@ -328,11 +328,21 @@ function AppFrame({
             icon={<BrandMark className="w-full h-full" />}
           />
   
-          {/* Registra /sw.js y avisa cuando hay una versión nueva esperando. */}
+          {/* Registra el service worker y avisa cuando hay una versión nueva
+              esperando. `SW_URL` lleva `?v=APP_VERSION`, así que subir la versión
+              en `app-config` alcanza para que el navegador vea otro worker, lo
+              instale, lo deje en `waiting` y este aviso salga solo — sin tocar
+              nada adentro de `public/sw.js`.
+
+              El aviso lo dispara la primera carga que trae el bundle nuevo (las
+              navegaciones son network-first: el HTML nuevo llega aunque el
+              worker viejo siga controlando la pestaña). Una pestaña que quede
+              abierta desde antes del deploy no se entera hasta que navegue: el
+              chequeo periódico del hook re-pide la URL vieja, que no cambió. */}
           <UpdatePrompt
-            swUrl="/sw.js"
+            swUrl={SW_URL}
             title="Hay una versión nueva"
-            description="Actualizá para tener los últimos cambios."
+            description={`Actualizá para pasar a la versión ${APP_VERSION} y tener los últimos cambios.`}
             actionLabel="Actualizar"
           />
   

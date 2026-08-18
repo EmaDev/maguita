@@ -13,7 +13,7 @@ import type { WorkoutType } from "@/lib/firebase/collections";
 import { mergeExercises, type ExerciseInfo } from "@/lib/exercise-catalog";
 import { DEFAULT_WORKOUT_TYPE, WEEK_ORDER, sortByWeek } from "@/lib/workout-model";
 import { ExercisePickerSheet } from "./ExercisePickerSheet";
-import { WEEKDAY_CHIPS, WORKOUT_TYPE_CHIPS } from "./workout-options";
+import { WEEKDAY_CHIPS, WEEKDAY_LABELS, WORKOUT_TYPE_CHIPS } from "./workout-options";
 
 /** Mismos topes que `workouts-actions.ts`: el server igual los valida. */
 const MAX_NAME_LENGTH = 60;
@@ -22,16 +22,6 @@ const MAX_DAY_TITLE_LENGTH = 60;
 const MAX_EXERCISE_NAME_LENGTH = 60;
 const MAX_EXERCISE_DETAIL_LENGTH = 200;
 const MAX_EXERCISES_PER_DAY = 30;
-
-const DAY_LABELS: Record<number, string> = {
-  0: "Domingo",
-  1: "Lunes",
-  2: "Martes",
-  3: "Miércoles",
-  4: "Jueves",
-  5: "Viernes",
-  6: "Sábado",
-};
 
 interface RoutineComposerProps {
   /** Rutina a editar. Ausente = alta de una nueva. */
@@ -180,7 +170,7 @@ export function WorkoutRoutineComposer({
       <div className="space-y-3 py-1">
         <Button size="sm" variant="ghost" onClick={() => setPickerFor(null)}>
           <ArrowLeftIcon className="h-4 w-4" />
-          Volver a {DAY_LABELS[pickerFor]}
+          Volver a {WEEKDAY_LABELS[pickerFor]}
         </Button>
         <ExercisePickerSheet
           exercises={exercises}
@@ -253,7 +243,7 @@ export function WorkoutRoutineComposer({
       {days.map((day) => (
         <div key={day.weekday} className="rounded-2xl border border-border p-3">
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-primary">
-            {DAY_LABELS[day.weekday]}
+            {WEEKDAY_LABELS[day.weekday]}
           </p>
 
           <Input

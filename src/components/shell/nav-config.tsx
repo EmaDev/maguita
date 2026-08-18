@@ -164,10 +164,19 @@ export const SCREEN_HEADERS: Record<string, ScreenHeader> = {
 };
 
 export function headerFor(pathname: string): ScreenHeader {
-  // `/inicio/periodos/{cycleId}` es dinámica (id de Firestore), no puede
-  // tener una entrada fija en `SCREEN_HEADERS` como el resto.
+  /* Las dos rutas dinámicas (ids de Firestore) no pueden tener una entrada fija
+     en `SCREEN_HEADERS` como el resto. El título es genérico porque el shell
+     sólo tiene el pathname: el nombre de la rutina y el del período los muestra
+     su propia pantalla como título, que además es donde se lee mejor.
+
+     Ninguna de las dos declara `tabs`. Las del detalle de una rutina son una
+     por día y salen de la rutina, así que las monta la pantalla — esta config
+     la resuelve el shell antes de que la pantalla lea sus datos. */
   if (pathname.startsWith(`${ROUTES.movementsPeriodos}/`)) {
     return { title: "Período anterior", back: true };
+  }
+  if (pathname.startsWith(`${ROUTES.miniAppEntrenamientoRutinas}/`)) {
+    return { title: "Rutina", subtitle: "Tu plan, día por día", back: true };
   }
   return SCREEN_HEADERS[pathname] ?? { title: "Maguita" };
 }

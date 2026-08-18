@@ -105,7 +105,7 @@ El límite cliente/servidor está en `AppShell`, no en los `layout.tsx`/`page.ts
 - **Safe areas** — `AppHeader` (top), `BottomNav` (bottom) y un `SafeArea edges={["left","right"]}` en el shell. `globals.css` pone el padding del `body` en 0 para no duplicar los insets que aplica la librería. `viewportFit: "cover"` en el `viewport` es lo que hace que `env(safe-area-inset-*)` valga algo en iOS.
 - **Splash** — variante `zoom` con fondo de marca, una vez por sesión.
 - **Instalador** — `PwaInstallPrompt` proactivo (banner Android/desktop, sheet con pasos en iOS) más un `InstallButton` en Ajustes.
-- **Actualizaciones** — `UpdatePrompt` registra `/sw.js` y avisa cuando hay versión nueva (handshake `SKIP_WAITING`). Para publicar una versión, bumpeá `CACHE_VERSION` en `public/sw.js`.
+- **Actualizaciones** — `UpdatePrompt` registra el service worker y avisa cuando hay versión nueva (handshake `SKIP_WAITING`). **Para publicar una versión se toca un solo número: `APP_VERSION` en `src/lib/app-config.ts`.** De ahí sale `SW_URL` (`/sw.js?v=<APP_VERSION>`): al cambiar la URL del worker el navegador instala uno nuevo, queda en `waiting` y el aviso le aparece al usuario en la primera carga después del deploy. `public/sw.js` lee ese `?v=` de su propia `self.location` para nombrar sus caches, así que la misma versión invalida lo cacheado. No hay variable de entorno en el medio: la versión es parte del código que se sube. Cuándo ese número pasa de `1.0.1` a `1.0.2` y cuándo a `1.1.0` está en [`docs/versionado.md`](docs/versionado.md).
 - **Offline** — navegaciones network-first con fallback a la última copia y, si no hay, a `/offline`. Los assets con hash van cache-first. Los payloads RSC y los Server Actions nunca se cachean.
 - **Tema** — provider propio en `components/theme/`: un script inline en el `<head>` aplica la clase `dark` antes del primer paint (sin flash) y `ThemeProvider` maneja el estado con `useSyncExternalStore` (incluye sincronía entre pestañas). Los tokens `--color-*` se pisan en `globals.css` (bloque `@theme` para claro, `.dark` para oscuro) y `useStatusBarColor` acompaña la barra de estado del sistema.
 
@@ -119,7 +119,7 @@ Todo sale de `src/app/globals.css`. Cambiar la paleta es tocar esos dos bloques 
 npm run icons     # regenera public/icons con el nuevo degradé (scripts/generate-icons.mjs)
 ```
 
-Los cuatro PNG se dibujan sin dependencias (buffer RGBA + `zlib`) con la misma marca que `BrandMark`. Fuera de `globals.css` los colores están hardcodeados en tres lugares que **no** leen CSS: `themeColor` del `viewport` (`layout.tsx`), `theme_color` del manifest y `useStatusBarColor` en el shell. Y como los íconos se sirven cache-first con el mismo nombre, hay que bumpear `CACHE_VERSION` en `public/sw.js` para que los instalados no se queden con los viejos.
+Los cuatro PNG se dibujan sin dependencias (buffer RGBA + `zlib`) con la misma marca que `BrandMark`. Fuera de `globals.css` los colores están hardcodeados en tres lugares que **no** leen CSS: `themeColor` del `viewport` (`layout.tsx`), `theme_color` del manifest y `useStatusBarColor` en el shell. Y como los íconos se sirven cache-first con el mismo nombre, hay que bumpear `APP_VERSION` en `src/lib/app-config.ts` para que los instalados no se queden con los viejos.
 
 ## Verificación
 
