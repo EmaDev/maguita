@@ -1,6 +1,6 @@
 import type { Chip } from "lib-kit-components";
-import type { WorkoutRoutine } from "@/lib/data/workouts";
-import { WEEK_ORDER, WORKOUT_TYPES } from "@/lib/workout-model";
+import type { WorkoutRoutine, WorkoutRoutineDay } from "@/lib/data/workouts";
+import { WEEK_ORDER, WORKOUT_TYPES, splitDetail, workoutTypeMeta } from "@/lib/workout-model";
 
 /**
  * Opciones de presentación de la mini-app de entrenamiento.
@@ -84,6 +84,39 @@ export function routineToJson(routine: WorkoutRoutine): string {
     null,
     2
   );
+}
+
+/**
+ * El plan de un día como texto plano, para compartirlo donde no se puede
+ * mandar la imagen: es el fallback de WhatsApp en desktop, donde no existe
+ * `navigator.share` con archivos y el link `wa.me` sólo acepta texto.
+ *
+ * Usa el mismo `splitDetail` que la pantalla y la imagen, así los tres
+ * muestran el bloque partido igual. Sin markdown de WhatsApp (`*negrita*`): en
+ * el campo de texto se ve el asterisco crudo hasta que se manda, y un plan de
+ * entrenamiento no gana nada con negritas.
+ */
+export function routineDayToText(routine: WorkoutRoutine, day: WorkoutRoutineDay): string {
+  const type = workoutTypeMeta(routine.type);
+  const lines = [
+    `${type.emoji} ${routine.name}`,
+    `${(WEEKDAY_LABELS[day.weekday] ?? "").toUpperCase()} — ${day.title}`,
+    "",
+  ];
+
+  day.exercises.forEach((exercise, index) => {
+    lines.push(`${index + 1}. ${exercise.name}`);
+    const parts = exercise.detail ? splitDetail(exercise.detail) : [];
+    if (parts.length === 1) {
+      lines.push(`   ${parts[0]}`);
+    } else {
+      for (const part of parts) lines.push(`   • ${part}`);
+    }
+  });
+
+  if (day.exercises.length === 0) lines.push("Sin ejercicios cargados.");
+
+  return lines.join("\n");
 }
 
 /**

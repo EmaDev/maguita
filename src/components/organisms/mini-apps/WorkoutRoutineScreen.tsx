@@ -2,13 +2,14 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Card, Tabs, useSnackbar } from "lib-kit-components";
+import { Button, Card, TabsCarousel, useSnackbar } from "lib-kit-components";
 import {
   CheckIcon,
   PencilIcon,
   ShareIcon,
   TrashIcon,
 } from "@/components/atoms/icons";
+import { WorkoutDayShareSheet } from "./WorkoutDayShareSheet";
 import { useAppSheet } from "@/components/shell/app-sheet";
 import { ROUTES } from "@/lib/app-config";
 import {
@@ -169,6 +170,13 @@ export function WorkoutRoutineScreen({
     badge: day.weekday === todayWeekday ? "hoy" : undefined,
   }));
 
+  function openShareSheet(day: WorkoutRoutineDay) {
+    openSheet(<WorkoutDayShareSheet routine={routine} day={day} />, {
+      title: `Compartir ${WEEKDAY_LABELS[day.weekday] ?? "el día"}`,
+      description: day.title,
+    });
+  }
+
   const dayPanels = Object.fromEntries(
     routine.days.map((day) => [
       String(day.weekday),
@@ -177,6 +185,7 @@ export function WorkoutRoutineScreen({
         day={day}
         exerciseById={exerciseById}
         onShowExercise={setExerciseDetail}
+        onShare={() => openShareSheet(day)}
       />,
     ])
   );
@@ -261,17 +270,27 @@ export function WorkoutRoutineScreen({
           Esta rutina no tiene días cargados. Editala para agregarlos.
         </p>
       ) : (
-        /* `scrollable` es lo que hace que 7 días entren igual que 3, y
-           `panels` deja que la librería haga el crossfade entre días. */
-        <Tabs
-          items={dayTabs}
-          value={openDay}
-          onChange={setOpenDay}
-          variant="segmented"
-          size="sm"
-          scrollable
-          panels={dayPanels}
-        />
+        /* `panels` es lo que hace que el día entre deslizándose desde el lado
+           al que se navega (martes → miércoles entra por la derecha), que es la
+           razón de usar `TabsCarousel` y no `Tabs`.
+
+           El `overflow-x-auto` va sobre el `[role=tablist]` y no sobre el
+           componente entero: `TabsCarousel` no tiene prop `scrollable` (su
+           tablist es un `flex gap-6` de botones `whitespace-nowrap`), así que
+           una rutina de 6 o 7 días se clipearía. Scrollear el componente entero
+           no serviría — el panel del día es hermano del tablist adentro del
+           mismo div, y se iría de ancho junto con las tabs. Se engancha por el
+           rol ARIA, que es parte del contrato del componente, y no por una clase
+           interna. */
+        <div className="[&_[role=tablist]]:overflow-x-auto [&_[role=tablist]]:scrollbar-none">
+          <TabsCarousel
+            items={dayTabs}
+            value={openDay}
+            onChange={setOpenDay}
+            size="sm"
+            panels={dayPanels}
+          />
+        </div>
       )}
 
       {/* Ficha del ejercicio. Sin acciones de ABM: crear, editar y borrar
@@ -285,6 +304,8 @@ interface RoutineDayPanelProps {
   day: WorkoutRoutineDay;
   exerciseById: Map<string, ExerciseInfo>;
   onShowExercise: (exercise: ExerciseInfo) => void;
+  /** Abre el sheet para compartir **este** día como imagen. */
+  onShare: () => void;
 }
 
 /**
@@ -296,13 +317,35 @@ interface RoutineDayPanelProps {
  * quedar como un párrafo corrido, que es lo único que se puede hacer mientras
  * `detail` sea texto libre.
  */
-function RoutineDayPanel({ day, exerciseById, onShowExercise }: RoutineDayPanelProps) {
+function RoutineDayPanel({
+  day,
+  exerciseById,
+  onShowExercise,
+  onShare,
+}: RoutineDayPanelProps) {
   return (
-    <Card variant="glass" padding="md" className="mt-3">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-primary">
-        {WEEKDAY_LABELS[day.weekday]}
-      </p>
-      <p className="mt-0.5 text-base font-semibold text-foreground">{day.title}</p>
+    <Card variant="glass" padding="md">
+      {/* El botón de compartir va en el encabezado del día y no abajo de la
+          lista: compartir es una acción sobre *este* día, y con un plan largo
+          un botón al final queda a un scroll de distancia de su contexto. */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-primary">
+            {WEEKDAY_LABELS[day.weekday]}
+          </p>
+          <p className="mt-0.5 text-base font-semibold text-foreground">{day.title}</p>
+        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="shrink-0"
+          aria-label={`Compartir ${WEEKDAY_LABELS[day.weekday] ?? "el día"}`}
+          onClick={onShare}
+        >
+          <ShareIcon className="h-4 w-4" />
+          Compartir
+        </Button>
+      </div>
 
       {day.exercises.length === 0 ? (
         <p className="mt-3 text-sm text-muted">Sin ejercicios cargados.</p>

@@ -1426,6 +1426,107 @@ nivel de campo para lectura.
 
 ## Changelog
 
+### 2026-08-18 — Entrenamiento: compartir el plan de un día como imagen
+
+**Qué cambió.** Nada del esquema: ni colecciones, ni campos, ni tipos, ni
+lecturas nuevas. Es una salida nueva para datos que ya estaban en pantalla — el
+plan de un día se puede copiar al portapapeles como imagen o mandar por la hoja
+nativa de compartir (que es por donde aparece WhatsApp).
+
+**La imagen se dibuja, no se captura** (`src/lib/workout-day-image.ts`). Un
+screenshot del DOM (html2canvas y compañía) traía tres problemas: una dependencia
+nueva de ~200 KB; el tema del usuario metido en la imagen, y una card oscura
+sobre fondo oscuro es ilegible en el visor de WhatsApp, que no sabe nada de
+temas; y fidelidad dudosa con Tailwind v4, que resuelve colores con `oklch()` y
+variables CSS. Dibujarla en un canvas cuesta un archivo y a cambio da una pieza
+diseñada para el destino: 1080 px de ancho, fondo claro **siempre**, banda de
+marca con el día para que se reconozca chiquita en una lista de chats, y
+tipografía grande. Misma decisión que `scripts/generate-icons.mjs` con los
+íconos de la PWA.
+
+- **Los colores son los tokens claros de la marca escritos a mano.** El canvas no
+  lee CSS: no hay forma de que tome `--color-primary`. Quedan duplicados en
+  `COLORS`, y es un duplicado consciente — la imagen *no debe* seguir el tema del
+  usuario, así que ni siquiera querríamos que leyera los tokens vivos.
+- **Dos pasadas: medir y después dibujar.** Un canvas no se puede redimensionar
+  sin borrar lo dibujado, así que todo el texto se parte en renglones y se suma
+  el alto antes del primer trazo. La tipografía se resuelve leyendo el
+  `font-family` computado del `body` (`next/font` genera un nombre propio y lo
+  expone en `--font-app-sans`), y se espera `document.fonts.ready` — sin eso se
+  mide con la fuente de fallback y los renglones se cortan en otro lugar.
+- **Un día muy cargado se escala, no se recorta.** iOS Safari corta los canvas
+  por área total (~16,7 M px). El peor caso que permite el modelo (30 ejercicios
+  con detalles largos) da 16.448 px de alto: el renderer detecta que se pasa del
+  máximo y aplica un `ctx.scale` al diseño entero (0,61 en ese caso → 655 ×
+  10.038 = 6,6 M px). Perder nitidez es aceptable; perder ejercicios no.
+- **`splitDetail` se reusa.** La imagen, la pantalla y el texto de WhatsApp
+  parten el detalle con la misma función, así que un metcon se ve igual en los
+  tres lados.
+
+**Las tres APIs de compartir tienen soporte desparejo** (`src/lib/share-image.ts`),
+y ninguna de las dos de la librería servía: `ShareButton` extiende `ShareData`
+(`title`/`text`/`url`) y **no acepta `files`**, así que comparte links pero no
+imágenes; `useClipboard` es `copy: (text: string)`, texto solo. Por eso cada
+función propia devuelve un `ShareOutcome` en vez de tirar — la UI necesita
+ofrecer el camino alternativo, no un cartel de error:
+
+| Situación | Qué hace |
+|---|---|
+| Chrome/Edge/Safari moderno | `navigator.clipboard.write` con un `image/png` |
+| Firefox (portapapeles de imágenes detrás de un flag) | descarga el PNG y lo avisa |
+| Android/iOS | `navigator.share({ files })` → hoja nativa con WhatsApp |
+| Desktop sin hoja nativa | `wa.me/?text=` con el plan como texto (`routineDayToText`) |
+
+- **`canShare({ files })` y no `"share" in navigator`**: hay browsers con `share`
+  para texto/URL que rechazan archivos.
+- **Cancelar no es un error.** `navigator.share` rechaza con `AbortError` cuando
+  el usuario cierra la hoja sin elegir nada; eso se distingue del error real y no
+  muestra nada.
+- **La imagen se genera una sola vez al abrir el sheet** y las dos acciones
+  comparten el mismo `Blob`. No es sólo por velocidad: un `await` largo entre el
+  toque y la llamada al portapapeles hace que algunos browsers consideren perdido
+  el gesto del usuario y rechacen la escritura.
+- **Vista previa antes de mandar** (`WorkoutDayShareSheet`). La imagen no es lo
+  que hay en pantalla, así que sin preview el usuario copiaría algo que no vio y
+  se enteraría recién al pegarlo en el chat.
+
+**Íconos nuevos** en `components/atoms/icons.tsx`: `ImageIcon` y `WhatsappIcon`.
+El de WhatsApp es el único del set que va con `fill` en vez de `stroke` — es una
+marca registrada y con el trazo de los demás no se reconocería.
+
+```mermaid
+flowchart TD
+    PANEL["RoutineDayPanel<br/>botón Compartir"] --> SHEET["WorkoutDayShareSheet<br/>genera el Blob una vez"]
+    SHEET --> IMG["renderRoutineDayImage()<br/>canvas 1080 px<br/>splitDetail() por ejercicio"]
+    IMG --> PREVIEW["vista previa en el sheet"]
+    PREVIEW --> COPY{"canCopyImage()"}
+    PREVIEW --> SHARE{"canShareFile(file)"}
+    COPY -->|sí| CB["clipboard.write image/png"]
+    COPY -->|no · Firefox| DL["downloadImage()"]
+    SHARE -->|sí · mobile| NATIVE["navigator.share files<br/>→ WhatsApp con la imagen"]
+    SHARE -->|no · desktop| WA["wa.me?text=<br/>routineDayToText()"]
+```
+
+**Reglas de Firestore: no hace falta cambiar nada, y esta vez ni se acercan.**
+Todo pasa en el cliente sobre datos que la pantalla ya tenía: no hay lectura ni
+escritura nueva, así que no hay superficie que asegurar. El bloque de
+`workoutRoutines` sigue igual:
+
+```
+    match /workoutRoutines/{routineId} {
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow write: if false;
+    }
+```
+
+> **Nota de privacidad.** La imagen se genera y se comparte **entera en el
+> dispositivo**: no se sube a ningún lado, no pasa por el server y no queda
+> guardada. El único momento en que sale del equipo es cuando el usuario elige
+> una app en la hoja de compartir. Vale decirlo porque Entrenamiento es un módulo
+> que se puede poner atrás del PinLock: compartir es una acción explícita del
+> usuario, no una sincronización.
+
+
 ### 2026-08-18 — Entrenamiento: pantalla de detalle de una rutina, con una tab por día
 
 **Qué cambió.** Nada del esquema: ni colecciones, ni campos, ni tipos. Es una
@@ -1467,8 +1568,24 @@ mini-app peor de lo que estaba.
   declara las tabs de cada ruta, pero el shell resuelve el header con
   `usePathname` **antes** de que la pantalla lea sus datos, y las tabs de día
   salen de la rutina (una por `days[].weekday`, entre 1 y 7). Así que el header
-  de esta ruta va sin `tabs` y `WorkoutRoutineScreen` monta su propio `Tabs`
-  (`scrollable`, para que 7 días entren igual que 3).
+  de esta ruta va sin `tabs` y `WorkoutRoutineScreen` monta su propio
+  `TabsCarousel` de `lib-kit-components`: los paneles se deslizan en la
+  dirección del cambio (martes → miércoles entra por la derecha), que es cómo se
+  recorre un plan día por día.
+- **El tablist de `TabsCarousel` se hace scrolleable a mano.** El componente no
+  expone prop de scroll (su tablist es un `flex gap-6` de botones
+  `whitespace-nowrap`), así que una rutina de 6 o 7 días se clipearía. Se le
+  aplica `overflow-x-auto` al `[role=tablist]` con una variante arbitraria y no
+  al componente entero, porque el panel del día es hermano del tablist adentro
+  del mismo div y se iría de ancho junto con las tabs. El gancho es el rol ARIA,
+  que es parte del contrato del componente, no una clase interna.
+- **`scrollbar-none` pasó a existir.** La librería aplica esa clase a todo lo
+  que scrollea en horizontal (el tablist de `Tabs scrollable` — la fila de tabs
+  del header del shell — y los tracks de `ChipCarousel`) pero **no la define**:
+  sólo existía como string en su bundle, así que era un no-op y esas filas
+  mostraban la barra de scroll nativa. Ahora está en `globals.css` como
+  `@utility` (no como regla suelta, para que Tailwind le pueda aplicar
+  variantes). Efecto colateral buscado: también arregla las tabs del header.
 - **Abre en el día de hoy** si la rutina entrena hoy, y si no en el primero de
   la semana; la tab de hoy además va marcada. Abrir siempre en lunes obliga a
   buscar la tab correcta todas las veces, y el día que se viene a leer es el que
@@ -1515,7 +1632,7 @@ flowchart TD
     CARD["WorkoutRoutineCard<br/>nombre · tipo · días · Activa<br/>(Link, sin plan ni acciones)"]
     DETAIL["/rutinas/{routineId}<br/>WorkoutRoutineScreen"]
     GATE{{"ModuleLockGate<br/>entrenamiento"}}
-    TABS["Tabs por día (scrollable)<br/>abre en el día de hoy"]
+    TABS["TabsCarousel: una tab por día<br/>abre en el día de hoy"]
     PANEL["RoutineDayPanel<br/>ejercicios numerados<br/>detalle → splitDetail()"]
     FICHA["ExerciseDetailModal<br/>si exerciseId resuelve"]
 

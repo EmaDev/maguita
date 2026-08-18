@@ -111,6 +111,32 @@ body {
   }
 }
 
+/* ============================
+   scrollbar-none
+
+   La librería aplica esta clase a todo lo que scrollea en horizontal (el
+   tablist de `Tabs scrollable` — o sea la fila de tabs del header del shell —
+   y los tracks de `ChipCarousel`), pero **no la define** en su `globals.css`:
+   sólo existe como string en el bundle. Sin esto la clase es un no-op y esas
+   filas muestran la barra de scroll nativa.
+
+   No lleva prefijo de proyecto porque el nombre lo elige la librería: acá lo
+   único que se hace es darle cuerpo al contrato que ya usa.
+
+   Va como `@utility` y no como una regla suelta para que Tailwind la registre
+   de verdad: así se le pueden aplicar variantes, que es lo que necesita el
+   detalle de una rutina (`[&_[role=tablist]]:scrollbar-none` sobre el tablist
+   de `TabsCarousel`, que no expone prop de scroll). Como CSS plano la variante
+   se generaba a medias — sólo `scrollbar-width`, sin la regla de WebKit.
+   ============================ */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* Acompaña la clase `dark` del <html>: pinta los controles nativos
    (scrollbars, inputs de fecha) y el fondo del overscroll. */
 html {

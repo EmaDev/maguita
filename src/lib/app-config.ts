@@ -22,7 +22,7 @@ export const APP_TAGLINE = "Tus mini-apps, favoritos y asistente en un solo luga
  * demás. Y todo deploy sube al menos el patch, porque este número es lo que
  * invalida las caches y dispara el aviso.
  */
-export const APP_VERSION = "1.1.0";
+export const APP_VERSION = "1.2.0";
 
 /**
  * URL con la que se registra el service worker, versionada.

@@ -300,6 +300,34 @@ export const ShareIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const ImageIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+    <circle cx="9" cy="10" r="1.6" />
+    <path d="M4 17l4.5-4.5 3.5 3.5 3-2.5 5 4" />
+  </Icon>
+);
+
+/**
+ * Logo de WhatsApp: el único ícono del set que va `fill` en vez de `stroke`.
+ * Es una marca registrada, así que se dibuja con su silueta real (globo con la
+ * cola abajo a la izquierda y el auricular adentro) en vez de aproximarla con
+ * el trazo de los demás — un logo mal dibujado no se reconoce.
+ */
+export const WhatsappIcon = (p: IconProps) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    stroke="none"
+    aria-hidden="true"
+    className="w-5 h-5"
+    {...p}
+  >
+    <path d="M12.04 2.5c-5.23 0-9.48 4.25-9.48 9.48 0 1.67.44 3.3 1.27 4.74L2.5 21.5l4.9-1.28a9.44 9.44 0 0 0 4.64 1.2h.01c5.22 0 9.47-4.25 9.47-9.48 0-2.53-.99-4.91-2.78-6.7a9.4 9.4 0 0 0-6.7-2.78Zm0 1.6c2.1 0 4.07.82 5.56 2.31a7.82 7.82 0 0 1 2.3 5.57c0 4.34-3.53 7.87-7.87 7.87a7.85 7.85 0 0 1-4-1.1l-.29-.16-2.9.76.77-2.84-.18-.3a7.83 7.83 0 0 1-1.2-4.19c0-4.34 3.53-7.87 7.87-7.87Z" />
+    <path d="M9.24 7.16c-.18-.4-.36-.4-.53-.41h-.45c-.16 0-.41.06-.63.3-.21.24-.81.8-.81 1.93 0 1.14.83 2.24.94 2.39.12.16 1.6 2.57 3.9 3.5 1.9.75 2.29.6 2.7.56.42-.04 1.34-.55 1.53-1.08.19-.53.19-.99.13-1.08-.05-.1-.2-.15-.42-.26-.23-.11-1.34-.66-1.55-.74-.2-.07-.35-.11-.5.12-.15.23-.58.75-.71.9-.13.16-.26.18-.49.06-.22-.11-.94-.35-1.79-1.11-.66-.59-1.1-1.3-1.23-1.53-.13-.23-.01-.36.1-.47.1-.11.25-.29.37-.44.12-.15.16-.26.24-.42.08-.16.04-.3-.02-.42-.06-.11-.53-1.28-.72-1.72Z" />
+  </svg>
+);
+
 export const DownloadIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M12 3.5v11M8 11l4 4 4-4" />

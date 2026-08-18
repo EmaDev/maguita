@@ -114,5 +114,6 @@ no cambió.
 
 | Versión | Qué entró |
 |---|---|
+| `1.2.0` | Compartir el plan de un día de entrenamiento como imagen: al portapapeles o por la hoja nativa del sistema (WhatsApp con la imagen adjunta), con fallback a texto por `wa.me` en desktop. La imagen se dibuja en un canvas —no es un screenshot— y se genera entera en el dispositivo. Además, las tabs de día pasaron a `TabsCarousel` y `scrollbar-none` dejó de ser una clase muerta: la librería la aplicaba sin definirla, así que las tabs del header y los `ChipCarousel` mostraban la barra de scroll nativa. |
 | `1.1.0` | Pantalla de detalle de una rutina de entrenamiento (ruta propia `/mini-apps/entrenamiento/rutinas/[routineId]`) y el composer de rutinas. Además, la versión pasó a ser la fuente única del despliegue: `SW_URL` la lleva en el query string y `public/sw.js` dejó de tener su propio `CACHE_VERSION`. |
 | `1.0.0` | Primera versión publicada. |
